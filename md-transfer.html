@@ -1,0 +1,2772 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MD Transfer — Machinedrum Sample Manager</title>
+<style>
+/* ============================================================
+   DESIGN: Industrial dark hardware aesthetic — like looking
+   at a piece of studio gear. Monospace + condensed sans.
+   Amber/green phosphor accents on near-black panels.
+   ============================================================ */
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow+Condensed:wght@300;400;600;700&family=Barlow:wght@300;400;500&display=swap');
+
+:root {
+  --bg0: #0a0b0d;
+  --bg1: #111318;
+  --bg2: #181c22;
+  --bg3: #1f242d;
+  --bg4: #252b36;
+  --panel: #14171e;
+  --border: #2a3040;
+  --border-bright: #3a4558;
+  --amber: #e8a020;
+  --amber-dim: #7a5010;
+  --amber-glow: #ffb83060;
+  --green: #30c060;
+  --green-dim: #184830;
+  --red: #e03040;
+  --red-dim: #601020;
+  --blue: #3080e0;
+  --blue-dim: #183060;
+  --text-primary: #c8d0dc;
+  --text-secondary: #6a7888;
+  --text-dim: #3a4555;
+  --text-amber: #e8a020;
+  --text-green: #30c060;
+  --font-mono: 'Share Tech Mono', monospace;
+  --font-ui: 'Barlow Condensed', sans-serif;
+  --font-body: 'Barlow', sans-serif;
+  --radius: 3px;
+  --radius-lg: 6px;
+  --glow-amber: 0 0 8px #e8a02040, 0 0 2px #e8a02080;
+  --glow-green: 0 0 8px #30c06040, 0 0 2px #30c06080;
+  --glow-red: 0 0 8px #e0304040, 0 0 2px #e0304080;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { font-size: 14px; }
+
+body {
+  background: var(--bg0);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  min-height: 100vh;
+  overflow-x: hidden;
+  background-image:
+    radial-gradient(ellipse 80% 40% at 50% -10%, #1a2540 0%, transparent 70%),
+    repeating-linear-gradient(0deg, transparent, transparent 39px, #ffffff04 39px, #ffffff04 40px),
+    repeating-linear-gradient(90deg, transparent, transparent 39px, #ffffff03 39px, #ffffff03 40px);
+}
+
+/* ---- HEADER ---- */
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 24px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-shadow: 0 2px 20px #00000080;
+}
+
+.app-logo {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.app-logo .brand {
+  font-family: var(--font-ui);
+  font-weight: 700;
+  font-size: 1.5rem;
+  letter-spacing: 0.12em;
+  color: var(--text-amber);
+  text-shadow: var(--glow-amber);
+  text-transform: uppercase;
+}
+.app-logo .sub {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  letter-spacing: 0.08em;
+}
+
+.hw-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px;
+}
+.hw-toggle label {
+  font-family: var(--font-ui);
+  font-weight: 600;
+  font-size: 0.85rem;
+  letter-spacing: 0.1em;
+  padding: 5px 14px;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: all 0.15s;
+  color: var(--text-secondary);
+  user-select: none;
+}
+.hw-toggle input[type=radio] { display: none; }
+.hw-toggle input[type=radio]:checked + label {
+  background: var(--amber-dim);
+  color: var(--text-amber);
+  box-shadow: var(--glow-amber);
+}
+
+.header-status {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+/* ---- MEMORY GAUGE (strip above send buttons) ---- */
+.gauge-track {
+  width: 100%;
+  height: 6px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+  position: relative;
+  flex-shrink: 0;
+}
+.gauge-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--green);
+  box-shadow: var(--glow-green);
+  border-radius: 2px;
+  transition: width 0.3s ease, background 0.3s ease, box-shadow 0.3s ease;
+}
+.gauge-fill.warn { background: var(--amber); box-shadow: var(--glow-amber); }
+.gauge-fill.over { background: var(--red);   box-shadow: var(--glow-red); }
+.mem-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 16px 4px;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.mem-strip-numbers {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  color: var(--text-secondary);
+  text-align: right;
+}
+
+/* ---- MIDI STATUS ---- */
+.midi-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+}
+.midi-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  transition: all 0.3s;
+}
+.midi-dot.connected { background: var(--green); box-shadow: var(--glow-green); }
+.midi-dot.error { background: var(--red); box-shadow: var(--glow-red); }
+
+/* ---- MAIN LAYOUT ---- */
+.app-main {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: auto 1fr;
+  gap: 0;
+  height: calc(100vh - 57px);
+  max-height: calc(100vh - 57px);
+}
+
+/* ---- PANELS ---- */
+.panel {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  overflow: hidden;
+}
+.panel:last-child { border-right: none; }
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.panel-title {
+  font-family: var(--font-ui);
+  font-weight: 700;
+  font-size: 0.8rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.panel-title .dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--amber); box-shadow: var(--glow-amber);
+}
+
+/* ---- SETTINGS BAR ---- */
+.settings-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  background: var(--bg1);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.setting-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.setting-group .lbl {
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+select, input[type=number], input[type=text] {
+  background: var(--bg3);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px 8px;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  outline: none;
+  transition: border-color 0.15s;
+  -webkit-appearance: none;
+}
+select:focus, input:focus {
+  border-color: var(--amber-dim);
+  box-shadow: 0 0 0 2px #e8a02015;
+}
+select { cursor: pointer; padding-right: 24px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%236a7888'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 7px center; }
+
+input[type=number] { width: 70px; }
+
+/* ---- BUTTONS ---- */
+.btn {
+  font-family: var(--font-ui);
+  font-weight: 600;
+  font-size: 0.78rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 5px 14px;
+  border: 1px solid;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 0.12s;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.btn-amber {
+  background: var(--amber-dim);
+  border-color: var(--amber);
+  color: var(--amber);
+}
+.btn-amber:hover { background: var(--amber); color: var(--bg0); box-shadow: var(--glow-amber); }
+.btn-green {
+  background: var(--green-dim);
+  border-color: var(--green);
+  color: var(--green);
+}
+.btn-green:hover { background: var(--green); color: var(--bg0); box-shadow: var(--glow-green); }
+.btn-red {
+  background: var(--red-dim);
+  border-color: var(--red);
+  color: var(--red);
+}
+.btn-red:hover { background: var(--red); color: var(--bg0); box-shadow: var(--glow-red); }
+.btn-ghost {
+  background: transparent;
+  border-color: var(--border-bright);
+  color: var(--text-secondary);
+}
+.btn-ghost:hover { border-color: var(--text-secondary); color: var(--text-primary); }
+.btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+.btn-icon { width: 26px; height: 26px; padding: 0; justify-content: center; font-size: 0.85rem; }
+
+/* ---- DROP ZONE ---- */
+.drop-zone {
+  flex: 1;
+  overflow-y: auto;
+  position: relative;
+  min-height: 120px;
+}
+.drop-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 12px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s;
+  background: #e8a02008;
+  border: 2px dashed var(--amber-dim);
+  z-index: 10;
+}
+.drop-zone.drag-over .drop-overlay { opacity: 1; }
+.drop-zone.empty .drop-overlay { opacity: 1; pointer-events: auto; }
+.drop-overlay .drop-icon {
+  font-size: 2.5rem;
+  opacity: 0.5;
+}
+.drop-overlay .drop-text {
+  font-family: var(--font-ui);
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  font-size: 0.85rem;
+  color: var(--amber-dim);
+  text-transform: uppercase;
+}
+.drop-overlay .drop-hint {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: var(--text-dim);
+}
+.drop-hidden-input { display: none; }
+
+/* ---- SAMPLE LIST ---- */
+.sample-list {
+  list-style: none;
+  padding: 4px 0;
+}
+
+.sample-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0;
+  padding: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg1);
+  transition: background 0.1s;
+  cursor: grab;
+  position: relative;
+}
+.sample-item:last-child { border-bottom: none; }
+.sample-item:hover { background: var(--bg2); }
+.sample-item.selected { background: #e8a02022; outline: 2px solid var(--amber); outline-offset: -2px; }
+.sample-item.dragging { opacity: 0.4; }
+.sample-item.processing { cursor: wait; }
+
+.sample-drag-handle {
+  padding: 0 8px;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  cursor: grab;
+  user-select: none;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+}
+
+.sample-main {
+  padding: 7px 8px 7px 4px;
+  min-width: 0;
+}
+.sample-name {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 2px;
+}
+.sample-meta {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.sample-meta span {
+  font-family: var(--font-mono);
+  font-size: 0.63rem;
+  color: var(--text-secondary);
+}
+.sample-meta .tag {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 0 4px;
+}
+.sample-meta .tag.ok { border-color: var(--green-dim); color: var(--green); }
+.sample-meta .tag.warn { border-color: var(--amber-dim); color: var(--amber); }
+.sample-meta .tag.err { border-color: var(--red-dim); color: var(--red); }
+
+.sample-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+.sample-item:hover .sample-actions { opacity: 1; }
+
+/* progress bar under item */
+.sample-progress {
+  position: absolute;
+  bottom: 0; left: 0;
+  height: 2px;
+  background: var(--amber);
+  box-shadow: var(--glow-amber);
+  transition: width 0.2s;
+  pointer-events: none;
+}
+
+/* ---- TRANSFER QUEUE (right panel) — list layout ---- */
+.slot-grid {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.slot-item {
+  display: grid;
+  grid-template-columns: 36px 52px 1fr auto auto;
+  align-items: center;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg1);
+  transition: background 0.1s;
+  cursor: pointer;
+  position: relative;
+  min-height: 34px;
+}
+.slot-item:last-child { border-bottom: none; }
+.slot-item:hover { background: var(--bg2); }
+.slot-item.drop-target { background: #e8a02010; outline: 1px solid var(--amber); }
+.slot-item.occupied { }
+.slot-item.selected-slot { background: #30c06018; outline: 2px solid var(--green); outline-offset: -2px; }
+.slot-item.sending { background: #3080e010; }
+.slot-item.sent { background: #30c06010; }
+
+.slot-num {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  text-align: right;
+  padding: 0 8px 0 10px;
+  user-select: none;
+}
+.slot-item.occupied .slot-num { color: var(--text-secondary); }
+.slot-item.selected-slot .slot-num { color: var(--green); }
+
+.slot-name {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--text-amber);
+  text-shadow: var(--glow-amber);
+  letter-spacing: 0.08em;
+  padding: 0 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.slot-name.empty { color: var(--text-dim); font-size: 0.7rem; text-shadow: none; }
+.slot-detail {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 6px;
+}
+.slot-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+.slot-item:hover .slot-actions { opacity: 1; }
+.slot-clear-btn, .slot-play-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.75rem;
+  line-height: 1;
+  padding: 3px 4px;
+  border-radius: 2px;
+  transition: color 0.1s;
+  color: var(--text-dim);
+}
+.slot-play-btn:hover  { color: var(--green); }
+.slot-play-btn.playing { color: var(--text-primary); }
+.slot-play-btn.playing:hover { color: var(--text-primary); }
+.src-play-btn.playing { color: var(--text-primary) !important; }
+.src-play-btn.playing:hover { color: var(--text-primary) !important; }
+.slot-edit-btn:hover  { color: var(--amber); }
+.slot-clear-btn:hover { color: var(--red); }
+
+/* ---- BOTTOM TOOLBARS ---- */
+.panel-footer {
+  padding: 8px 16px;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+/* ---- MIDI PANEL (below right) ---- */
+.midi-panel {
+  border-top: 1px solid var(--border);
+  padding: 8px 16px;
+  background: var(--bg1);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+/* ---- WAVEFORM / PLAYER ---- */
+.player-modal {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: #00000090;
+  align-items: center;
+  justify-content: center;
+}
+.player-modal.open { display: flex; }
+.player-box {
+  background: var(--panel);
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  width: 640px;
+  max-width: 95vw;
+  box-shadow: 0 20px 60px #00000080;
+}
+.player-title {
+  font-family: var(--font-ui);
+  font-weight: 700;
+  font-size: 1rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-amber);
+  margin-bottom: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+canvas#waveform {
+  width: 100%;
+  height: 96px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  display: block;
+}
+.loop-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 12px;
+}
+.loop-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.loop-field label {
+  font-family: var(--font-ui);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.loop-field-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.loop-field-row input[type=number] { flex: 1; }
+.nudge-btn {
+  font-family: var(--font-mono);
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  border-radius: var(--radius);
+  width: 26px; height: 26px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.1s;
+  padding: 0;
+}
+.nudge-btn:hover { background: var(--bg4); border-color: var(--amber); color: var(--amber); }
+
+.player-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+.loop-enabled-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.loop-enabled-row label {
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+input[type=checkbox] {
+  accent-color: var(--amber);
+  width: 14px; height: 14px;
+  cursor: pointer;
+}
+
+/* ---- PROMPT MODAL ---- */
+.modal-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  background: #00000090;
+  align-items: center;
+  justify-content: center;
+}
+.modal-overlay.open { display: flex; }
+.modal-box {
+  background: var(--panel);
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  width: 360px;
+  max-width: 95vw;
+  box-shadow: 0 20px 60px #00000080;
+}
+.modal-box h3 {
+  font-family: var(--font-ui);
+  font-weight: 700;
+  font-size: 1rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-amber);
+  margin-bottom: 12px;
+}
+.modal-box p {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin-bottom: 16px;
+}
+.modal-box .modal-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.modal-box input[type=number], .modal-box select {
+  width: 100%;
+  margin-bottom: 10px;
+}
+
+/* root-note-list CSS removed — now uses a <select> dropdown */
+
+/* ---- LOG / STATUS BAR ---- */
+.status-bar {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  background: var(--bg0);
+  border-top: 1px solid var(--border);
+  padding: 4px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  z-index: 50;
+  height: 28px;
+}
+.status-bar .status-text {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--text-secondary);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.status-bar .status-text.ok { color: var(--green); }
+.status-bar .status-text.warn { color: var(--amber); }
+.status-bar .status-text.err { color: var(--red); }
+.status-bar .spinner {
+  width: 10px; height: 10px;
+  border: 1.5px solid var(--border);
+  border-top-color: var(--amber);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  display: none;
+  flex-shrink: 0;
+}
+.status-bar .spinner.active { display: block; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---- SCROLLBAR ---- */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg0); }
+::-webkit-scrollbar-thumb { background: var(--bg4); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-bright); }
+
+/* ---- SEND PROGRESS ---- */
+.send-progress-bar {
+  height: 3px;
+  background: var(--bg2);
+  border-radius: 2px;
+  overflow: hidden;
+  width: 120px;
+}
+.send-progress-fill {
+  height: 100%;
+  background: var(--green);
+  box-shadow: var(--glow-green);
+  transition: width 0.2s;
+  border-radius: 2px;
+}
+
+/* ---- TURBO INDICATOR ---- */
+.turbo-indicator {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: var(--text-dim);
+  letter-spacing: 0.08em;
+}
+.turbo-indicator.active { color: var(--blue); }
+
+/* ---- SEPARATORS ---- */
+.sep {
+  width: 1px; height: 16px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+/* ---- BATCH CONFIRM banner ---- */
+.batch-banner {
+  background: #e8a02015;
+  border: 1px solid var(--amber-dim);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 6px 16px;
+  flex-shrink: 0;
+}
+.batch-banner.visible { display: flex; }
+.batch-banner .msg {
+  font-family: var(--font-ui);
+  font-size: 0.78rem;
+  color: var(--amber);
+  letter-spacing: 0.06em;
+}
+
+/* adjust main height for status bar */
+.app-main { padding-bottom: 28px; }
+</style>
+</head>
+<body>
+
+<!-- ===== HEADER ===== -->
+<header class="app-header">
+  <div class="app-logo">
+    <span class="brand">MD Transfer</span>
+    <span class="sub">SPS-1UW Sample Manager</span>
+  </div>
+
+  <button class="btn btn-ghost" id="btnOpenSettings" style="font-size:0.78rem;padding:5px 16px;letter-spacing:0.12em">⚙ SETTINGS</button>
+
+</header>
+
+<!-- ===== MAIN ===== -->
+<main class="app-main">
+
+  <!-- ===== LEFT PANEL: PROCESSOR ===== -->
+  <section class="panel" id="processorPanel">
+    <div class="panel-header">
+      <span class="panel-title"><span class="dot"></span>PROCESSOR — BATCH SOURCE</span>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-ghost" id="btnSelectAll" style="font-size:0.68rem;padding:3px 10px">SELECT ALL</button>
+        <button class="btn btn-ghost" id="btnClearSource" style="font-size:0.68rem;padding:3px 10px">CLEAR</button>
+      </div>
+    </div>
+
+    <!-- DSP settings -->
+    <div class="settings-bar">
+      <div class="setting-group">
+        <span class="lbl">Target A</span>
+        <select id="targetOctave">
+          <option value="0">A0</option>
+          <option value="1">A1</option>
+          <option value="2">A2</option>
+          <option value="3">A3</option>
+          <option value="4" selected>A4</option>
+          <option value="5">A5</option>
+          <option value="6">A6</option>
+          <option value="7">A7</option>
+          <option value="8">A8</option>
+        </select>
+      </div>
+      <div class="sep"></div>
+      <div class="setting-group">
+        <span class="lbl">Rate</span>
+        <select id="targetSampleRate">
+          <option value="22050">22kHz</option>
+          <option value="32000">32kHz</option>
+          <option value="44100" selected>44.1kHz</option>
+          <option value="custom">Custom</option>
+        </select>
+        <input type="number" id="customSampleRate" value="44100" min="4000" max="96000"
+          style="display:none;width:78px">
+      </div>
+      <div class="sep"></div>
+      <div class="setting-group">
+        <span class="lbl">Mono</span>
+        <select id="monoMode">
+          <option value="stereo">Stereo</option>
+          <option value="left">L only</option>
+          <option value="right">R only</option>
+          <option value="sum">L+R sum</option>
+          <option value="mid" selected>Mid (M/S)</option>
+        </select>
+      </div>
+      <div class="sep"></div>
+      <div class="setting-group">
+        <span class="lbl">Quality</span>
+        <select id="sincTaps">
+          <option value="256" selected>Best (slow)</option>
+          <option value="128">Medium</option>
+          <option value="64">Fast (low)</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- batch confirm banner -->
+    <div class="batch-banner" id="batchBanner">
+      <span class="msg" id="batchMsg">⬡ 0 files queued — click GO to process all</span>
+      <button class="btn btn-amber" id="btnGo" style="padding:4px 16px">▶ GO</button>
+    </div>
+
+    <!-- drop zone -->
+    <div class="drop-zone empty" id="sourceDropZone">
+      <div class="drop-overlay" id="sourceDropOverlay">
+        <div class="drop-icon">⊕</div>
+        <div class="drop-text">Drop WAV Files Here</div>
+        <div class="drop-hint">or click to browse</div>
+      </div>
+      <input type="file" class="drop-hidden-input" id="fileInput" multiple accept=".wav,audio/wav">
+      <ul class="sample-list" id="sourceList"></ul>
+    </div>
+
+    <!-- footer -->
+    <div class="panel-footer">
+      <button class="btn btn-amber" id="btnProcessSelected">⚙ PROCESS SELECTED</button>
+      <button class="btn btn-ghost" id="btnDownloadProcessed">↓ WAV</button>
+      <button class="btn btn-ghost" id="btnDownloadHQ">↓ HQ WAV</button>
+      <button class="btn btn-ghost" id="btnDownloadSyx">↓ SYX</button>
+      <div style="flex:1"></div>
+      <button class="btn btn-ghost" id="btnAddToQueue">→ QUEUE</button>
+    </div>
+  </section>
+
+  <!-- ===== RIGHT PANEL: TRANSFER QUEUE ===== -->
+  <section class="panel" id="queuePanel">
+    <div class="panel-header">
+      <span class="panel-title"><span class="dot" style="background:var(--green);box-shadow:var(--glow-green)"></span>TRANSFER QUEUE — MD SLOTS</span>
+      <button class="btn btn-ghost" id="btnClearQueue" style="font-size:0.68rem;padding:3px 10px">CLEAR ALL</button>
+    </div>
+
+    <!-- slot grid -->
+    <div class="slot-grid" id="slotGrid"></div>
+
+
+
+    <div class="mem-strip">
+      <div class="gauge-track">
+        <div class="gauge-fill" id="memGaugeFill" style="width:0%"></div>
+      </div>
+      <span class="mem-strip-numbers" id="memNumbers">0 / 2097152 B</span>
+    </div>
+
+    <div class="panel-footer">
+      <button class="btn btn-green" id="btnSendAll" style="background:#183060;border-color:var(--green);color:var(--green)">▶▶ SEND ALL</button>
+      <button class="btn btn-green" id="btnSendSelected">▶ SEND SELECTED</button>
+      <button class="btn btn-red" id="btnAbortSend" style="display:none">■ ABORT</button>
+      <div style="flex:1"></div>
+      <div class="send-progress-bar" id="sendProgressBar" style="display:none">
+        <div class="send-progress-fill" id="sendProgressFill" style="width:0%"></div>
+      </div>
+      <span class="turbo-indicator" id="turboIndicator">1× STD</span>
+    </div>
+  </section>
+
+</main>
+
+<!-- ===== PLAYER / LOOP EDITOR MODAL ===== -->
+<div class="player-modal" id="playerModal">
+  <div class="player-box">
+    <div class="player-title">
+      <span id="playerFileName">SAMPLE.WAV</span>
+      <button class="btn btn-ghost btn-icon" id="btnClosePlayer">✕</button>
+    </div>
+    <canvas id="waveform" width="600" height="96"></canvas>
+    <div class="loop-enabled-row">
+      <input type="checkbox" id="loopEnabled">
+      <label for="loopEnabled">LOOP ENABLED</label>
+      <span style="flex:1"></span>
+      <span id="playerSampleRate" style="font-family:var(--font-mono);font-size:0.65rem;color:var(--text-secondary)"></span>
+    </div>
+    <div class="loop-controls" id="loopControlsArea">
+      <div class="loop-field">
+        <label>Loop Start (samples)</label>
+        <div class="loop-field-row">
+          <button class="nudge-btn" data-target="loopStart" data-dir="-1">−</button>
+          <input type="number" id="loopStart" min="0" value="0">
+          <button class="nudge-btn" data-target="loopStart" data-dir="1">+</button>
+        </div>
+      </div>
+      <div class="loop-field">
+        <label>Loop End (samples)</label>
+        <div class="loop-field-row">
+          <button class="nudge-btn" data-target="loopEnd" data-dir="-1">−</button>
+          <input type="number" id="loopEnd" min="0" value="0">
+          <button class="nudge-btn" data-target="loopEnd" data-dir="1">+</button>
+        </div>
+      </div>
+    </div>
+    <div class="player-controls">
+      <button class="btn btn-amber" id="btnPlay">▶ PLAY</button>
+      <button class="btn btn-ghost" id="btnPlayLoop">⟳ PLAY LOOP</button>
+      <button class="btn btn-ghost" id="btnStop">■ STOP</button>
+      <div style="flex:1"></div>
+      <button class="btn btn-green" id="btnApplyLoop">✓ APPLY</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SETTINGS MODAL ===== -->
+<div class="modal-overlay" id="settingsModal">
+  <div class="modal-box" style="width:460px">
+    <h3>Settings</h3>
+
+    <div style="margin-bottom:18px">
+      <div class="lbl" style="font-family:var(--font-ui);font-size:0.7rem;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:var(--text-secondary);margin-bottom:8px">Hardware Version</div>
+      <div class="hw-toggle">
+        <input type="radio" name="hwver" id="hwMk1" value="mk1" checked>
+        <label for="hwMk1">MK1 &nbsp;(2.0 MB / 32 slots)</label>
+        <input type="radio" name="hwver" id="hwMk2" value="mk2">
+        <label for="hwMk2">MK2 &nbsp;(2.5 MB / 48 slots)</label>
+      </div>
+    </div>
+
+    <div style="margin-bottom:18px">
+      <div class="lbl" style="font-family:var(--font-ui);font-size:0.7rem;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:var(--text-secondary);margin-bottom:8px">MIDI Output Port</div>
+      <select id="midiPortSelect" style="width:100%">
+        <option value="">— none —</option>
+      </select>
+    </div>
+
+    <div style="margin-bottom:18px">
+      <div class="lbl" style="font-family:var(--font-ui);font-size:0.7rem;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:var(--text-secondary);margin-bottom:8px">Transfer Speed</div>
+      <select id="turboSpeed" style="width:100%">
+        <option value="1" selected>1× Standard (no Turbo MIDI interface)</option>
+        <option value="2">2× Turbo (TM-1)</option>
+        <option value="4">4× Turbo (TM-1)</option>
+        <option value="8">8× Turbo (TM-1)</option>
+      </select>
+    </div>
+
+    <div style="margin-bottom:18px">
+      <div class="lbl" style="font-family:var(--font-ui);font-size:0.7rem;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:var(--text-secondary);margin-bottom:8px">SDS Handshake</div>
+      <select id="sdsHandshake" style="width:100%">
+        <option value="closed" selected>Closed-loop (ACK/NAK — recommended)</option>
+        <option value="open">Open-loop (fire and forget)</option>
+      </select>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-amber" id="btnCloseSettings">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== ROOT NOTE MODAL ===== -->
+<div class="modal-overlay" id="rootNoteModal">
+  <div class="modal-box">
+    <h3>Root Note Unknown</h3>
+    <p id="rootNoteModalMsg">No instrument chunk found in this file. Please select the root note:</p>
+    <select id="rootNoteSelect" style="width:100%;margin:12px 0 16px"></select>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btnRootCancel">Skip</button>
+      <button class="btn btn-amber" id="btnRootConfirm">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== BATCH CONFIRM MODAL ===== -->
+<div class="modal-overlay" id="batchConfirmModal">
+  <div class="modal-box">
+    <h3>Loop Type Warning</h3>
+    <p id="batchConfirmMsg">Some files contain ping-pong or reverse loop types which the Machinedrum does not support. These loops will be converted to forward loops. Continue?</p>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btnBatchCancel">Cancel</button>
+      <button class="btn btn-amber" id="btnBatchProceed">Proceed</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== STATUS BAR ===== -->
+<div class="status-bar">
+  <div class="spinner" id="globalSpinner"></div>
+  <span class="status-text" id="statusText">Ready — drop WAV files to begin</span>
+  <div class="midi-status" style="margin-left:auto;flex-shrink:0">
+    <div class="midi-dot" id="midiDot"></div>
+    <span id="midiLabel">NO MIDI</span>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// MD TRANSFER — Main Application Script
+// Machinedrum SPS-1UW Sample Manager
+// ============================================================
+
+// ============================================================
+// SECTION 1: CONSTANTS & CONFIGURATION
+// ============================================================
+const MD_CONFIG = {
+  MK1: { slots: 32, maxMemory: 2 * 1024 * 1024 },         // 2.0 MB
+  MK2: { slots: 48, maxMemory: 2.5 * 1024 * 1024 },       // 2.5 MB
+};
+
+// SDS slot offset — change here if needed for hardware quirks
+const SDS_SLOT_OFFSET = 0;
+
+// Elektron SysEx name prefix: F0 00 20 3C 02 00 73
+const ELEKTRON_NAME_PREFIX = [0xF0, 0x00, 0x20, 0x3C, 0x02, 0x00, 0x73];
+
+// SDS SysEx constants
+const SDS = {
+  HEADER: 0xF0,
+  MANU_ID: 0x7E,
+  DUMP_HEADER: 0x01,
+  DUMP_REQ: 0x03,
+  DATA_PACKET: 0x02,
+  ACK: 0x7F,
+  NAK: 0x7E,
+  CANCEL: 0x7D,
+  WAIT: 0x7C,
+  EOX: 0xF7,
+  DEVICE_ID: 0x00,
+  PACKET_DELAY_MS: 60,
+  BYTES_PER_PACKET: 120,  // 40 3-byte samples
+};
+
+// NOTE NAMES
+const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const MIDI_NOTE_A = [9, 21, 33, 45, 57, 69, 81, 93]; // A0–A7
+
+// ============================================================
+// SECTION 2: APPLICATION STATE
+// ============================================================
+const state = {
+  hwVersion: 'mk1',
+  sourceFiles: [],       // { id, name, rawBuffer, processedBuffer, hqBuffer, rootNote, loopStart, loopEnd, hasLoop, status, syxData, size }
+  slots: [],             // Array of { sampleId | null }
+  selectedSourceIds: new Set(),
+  selectedSlotIndices: new Set(),
+  midiAccess: null,
+  midiOutput: null,
+  isSending: false,
+  playingItemId: null,  // id of item currently playing inline
+  abortSend: false,
+  pendingRootNoteResolve: null,
+  playerItem: null,
+  playerAudioCtx: null,
+  playerNode: null,
+  playerLoopStart: 0,
+  playerLoopEnd: 0,
+  playerIsLooping: false,
+};
+
+let nextId = 1;
+
+// ============================================================
+// SECTION 3: DOM REFS
+// ============================================================
+const $ = id => document.getElementById(id);
+const dom = {
+  memGaugeFill: $('memGaugeFill'),
+  memNumbers: $('memNumbers'),
+  midiDot: $('midiDot'),
+  midiLabel: $('midiLabel'),
+  sourceDropZone: $('sourceDropZone'),
+  sourceDropOverlay: $('sourceDropOverlay'),
+  fileInput: $('fileInput'),
+  sourceList: $('sourceList'),
+  slotGrid: $('slotGrid'),
+  batchBanner: $('batchBanner'),
+  batchMsg: $('batchMsg'),
+  btnSelectAll: $('btnSelectAll'),
+  btnClearSource: $('btnClearSource'),
+  btnClearQueue: $('btnClearQueue'),
+  btnGo: $('btnGo'),
+  btnProcessSelected: $('btnProcessSelected'),
+  btnDownloadProcessed: $('btnDownloadProcessed'),
+  btnDownloadHQ: $('btnDownloadHQ'),
+  btnDownloadSyx: $('btnDownloadSyx'),
+  btnAddToQueue: $('btnAddToQueue'),
+  btnSendAll: $('btnSendAll'),
+  btnSendSelected: $('btnSendSelected'),
+  btnAbortSend: $('btnAbortSend'),
+  sendProgressBar: $('sendProgressBar'),
+  sendProgressFill: $('sendProgressFill'),
+  turboIndicator: $('turboIndicator'),
+  statusText: $('statusText'),
+  globalSpinner: $('globalSpinner'),
+  targetOctave: $('targetOctave'),
+  targetSampleRate: $('targetSampleRate'),
+  customSampleRate: $('customSampleRate'),
+  monoMode: $('monoMode'),
+  sincTaps: $('sincTaps'),
+  midiPortSelect: $('midiPortSelect'),
+  turboSpeed: $('turboSpeed'),
+  sdsHandshake: $('sdsHandshake'),
+  // player
+  playerModal: $('playerModal'),
+  playerFileName: $('playerFileName'),
+  waveform: $('waveform'),
+  loopEnabled: $('loopEnabled'),
+  loopStart: $('loopStart'),
+  loopEnd: $('loopEnd'),
+  playerSampleRate: $('playerSampleRate'),
+  btnPlay: $('btnPlay'),
+  btnPlayLoop: $('btnPlayLoop'),
+  btnStop: $('btnStop'),
+  btnApplyLoop: $('btnApplyLoop'),
+  btnClosePlayer: $('btnClosePlayer'),
+  // root note
+  rootNoteModal: $('rootNoteModal'),
+  rootNoteModalMsg: $('rootNoteModalMsg'),
+  btnRootCancel: $('btnRootCancel'),
+  btnRootConfirm: $('btnRootConfirm'),
+  btnOpenSettings: $('btnOpenSettings'),
+  settingsModal: $('settingsModal'),
+  // batch confirm
+  batchConfirmModal: $('batchConfirmModal'),
+  batchConfirmMsg: $('batchConfirmMsg'),
+  btnBatchCancel: $('btnBatchCancel'),
+  btnBatchProceed: $('btnBatchProceed'),
+};
+
+// ============================================================
+// SECTION 4: HARDWARE VERSION / MEMORY GAUGE
+// ============================================================
+function getHWConfig() {
+  return MD_CONFIG[state.hwVersion === 'mk1' ? 'MK1' : 'MK2'];
+}
+
+function initSlots() {
+  const cfg = getHWConfig();
+  state.slots = Array(cfg.slots).fill(null);
+  renderSlotGrid();
+  updateMemGauge();
+}
+
+function updateMemGauge() {
+  const cfg = getHWConfig();
+  let used = 0;
+  state.slots.forEach(sid => {
+    if (sid) {
+      const item = state.sourceFiles.find(f => f.id === sid);
+      if (item && item.processedBuffer) used += item.processedBuffer.byteLength;
+    }
+  });
+  const pct = Math.min(100, (used / cfg.maxMemory) * 100);
+  dom.memGaugeFill.style.width = pct + '%';
+  dom.memGaugeFill.className = 'gauge-fill' + (pct >= 100 ? ' over' : pct > 85 ? ' warn' : '');
+  dom.memNumbers.textContent = `${fmtBytes(used)} / ${fmtBytes(cfg.maxMemory)}`;
+}
+
+document.querySelectorAll('input[name=hwver]').forEach(r => {
+  r.addEventListener('change', () => {
+    state.hwVersion = r.value;
+    initSlots();
+    setStatus(`Hardware: ${r.value.toUpperCase()} (${getHWConfig().slots} slots, ${fmtBytes(getHWConfig().maxMemory)})`);
+  });
+});
+
+// ============================================================
+// SECTION 5: WAV PARSER (binary chunk reader)
+// ============================================================
+function parseWAV(buffer) {
+  const view = new DataView(buffer);
+  const result = {
+    channels: 0, sampleRate: 0, bitsPerSample: 0, numSamples: 0,
+    audioData: null,
+    loopStart: null, loopEnd: null, hasLoop: false, loopType: 0,
+    rootNote: null, rootNoteMidi: null,
+    rootNoteSmpl: null, rootNoteInst: null,
+    errors: [],
+  };
+
+  const readFourCC = offset => String.fromCharCode(
+    view.getUint8(offset), view.getUint8(offset+1),
+    view.getUint8(offset+2), view.getUint8(offset+3)
+  );
+
+  if (readFourCC(0) !== 'RIFF' || readFourCC(8) !== 'WAVE') {
+    result.errors.push('Not a valid WAV file');
+    return result;
+  }
+
+  // Two-pass parse: read fmt first regardless of chunk order,
+  // so numSamples and loop rescaling are always based on correct channel count.
+  let offset = 12;
+  while (offset < buffer.byteLength - 8) {
+    const chunkId = readFourCC(offset);
+    const chunkSize = view.getUint32(offset + 4, true);
+    if (chunkId === 'fmt ') {
+      result.channels = view.getUint16(offset + 10, true);
+      result.sampleRate = view.getUint32(offset + 12, true);
+      result.bitsPerSample = view.getUint16(offset + 22, true);
+      result.audioFormat = view.getUint16(offset + 8, true);
+    }
+    offset += 8 + chunkSize + (chunkSize & 1);
+  }
+
+  // Second pass: read all other chunks (fmt already known)
+  offset = 12;
+  while (offset < buffer.byteLength - 8) {
+    const chunkId = readFourCC(offset);
+    const chunkSize = view.getUint32(offset + 4, true);
+
+    if (chunkId === 'fmt ') {
+      // already read above
+    }
+    else if (chunkId === 'data') {
+      result.audioDataOffset = offset + 8;
+      result.audioDataSize = chunkSize;
+    }
+    else if (chunkId === 'smpl') {
+      // smpl chunk layout (offsets relative to chunk start):
+      // +8 manufacturer, +12 product, +16 sample period, +20 unity note, +36 num loops
+      const unityNote = view.getUint32(offset + 20, true);
+      if (unityNote <= 127) result.rootNoteSmpl = unityNote;
+      const numLoops = view.getUint32(offset + 36, true);
+      if (numLoops > 0) {
+        const loopOffset = offset + 44;
+        result.loopType = view.getUint32(loopOffset + 4, true);
+        result.loopStart = view.getUint32(loopOffset + 8, true);
+        result.loopEnd = view.getUint32(loopOffset + 12, true);
+        result.hasLoop = true;
+      }
+    }
+    else if (chunkId === 'inst') {
+      // inst chunk layout (offsets relative to chunk start):
+      // +8 unshiftedNote (uint8, absolute MIDI note 0-127) — the root note directly
+      // +9 fineTune (int8, cents), +10 gain (int8, dB), +11-14 note/vel range
+      const instNote = view.getUint8(offset + 8);
+      if (instNote <= 127) result.rootNoteInst = instNote;
+    }
+
+    offset += 8 + chunkSize + (chunkSize & 1); // word align
+  }
+
+  // Decode audio samples to float32
+  if (result.audioDataOffset !== undefined) {
+    const raw = new Uint8Array(buffer, result.audioDataOffset, result.audioDataSize);
+    const bytesPerSample = result.bitsPerSample / 8;
+    result.numSamples = Math.floor(result.audioDataSize / (bytesPerSample * result.channels));
+    result.audioData = decodeToFloat32(raw, result.bitsPerSample, result.audioFormat, result.numSamples * result.channels);
+  }
+
+  return result;
+}
+
+function decodeToFloat32(raw, bits, format, count) {
+  const out = new Float32Array(count);
+  const dv = new DataView(raw.buffer, raw.byteOffset, raw.byteLength);
+  for (let i = 0; i < count; i++) {
+    const byteOff = i * (bits / 8);
+    if (format === 3) { // float
+      out[i] = bits === 64 ? dv.getFloat64(byteOff, true) : dv.getFloat32(byteOff, true);
+    } else {
+      if (bits === 8) out[i] = (dv.getUint8(byteOff) - 128) / 128.0;
+      else if (bits === 16) out[i] = dv.getInt16(byteOff, true) / 32768.0;
+      else if (bits === 24) {
+        const b0 = dv.getUint8(byteOff), b1 = dv.getUint8(byteOff+1), b2 = dv.getUint8(byteOff+2);
+        let val = b0 | (b1 << 8) | (b2 << 16);
+        if (val & 0x800000) val |= 0xFF000000;
+        out[i] = val / 8388608.0;
+      } else if (bits === 32) {
+        out[i] = dv.getInt32(byteOff, true) / 2147483648.0;
+      }
+    }
+  }
+  return out;
+}
+
+// ============================================================
+// SECTION 6: DSP ENGINE
+// ============================================================
+
+// --- Mono Mixdown (before pitch shift) ---
+function toMono(floatData, channels, monoMode) {
+  if (channels === 1 || monoMode === 'stereo') return { data: floatData, channels };
+  const frames = floatData.length / channels;
+  const mono = new Float32Array(frames);
+  for (let i = 0; i < frames; i++) {
+    const L = floatData[i * channels];
+    const R = channels > 1 ? floatData[i * channels + 1] : L;
+    switch (monoMode) {
+      case 'left':  mono[i] = L; break;
+      case 'right': mono[i] = R; break;
+      case 'mid':   mono[i] = (L + R) * 0.5; break; // true mid (no side)
+      default:      mono[i] = (L + R) * 0.5; break;  // sum → normalize
+    }
+  }
+  return { data: mono, channels: 1 };
+}
+
+// --- Windowed Sinc Interpolation Resampler ---
+// Kaiser window, configurable taps (64/128/256)
+function kaiserWindow(n, N, beta) {
+  // Approximation of I0 (modified Bessel function)
+  function i0(x) {
+    let s = 1, t = 1;
+    for (let k = 1; k <= 30; k++) {
+      t *= (x / 2 / k) * (x / 2 / k);
+      s += t;
+      if (t < 1e-12) break;
+    }
+    return s;
+  }
+  const mid = (N - 1) / 2;
+  const arg = 1 - Math.pow((n - mid) / mid, 2);
+  return i0(beta * Math.sqrt(Math.max(0, arg))) / i0(beta);
+}
+
+// buildSincKernel removed: resampleWindowed now evaluates the kernel inline per output sample
+// for correct fractional sinc interpolation.
+
+function resampleWindowed(inputData, srcRate, dstRate, taps) {
+  if (srcRate === dstRate) return inputData;
+  const ratio = srcRate / dstRate;
+  const outLen = Math.round(inputData.length * dstRate / srcRate);
+  const half = Math.floor((taps - 1) / 2);
+  // Correct cutoff: for upsample (ratio<1) limit to srcNyquist; for downsample (ratio>1) anti-alias
+  const cutoff = ratio < 1.0 ? ratio : 1.0 / ratio;
+  const out = new Float32Array(outLen);
+  const PI = Math.PI;
+  // Fractional windowed-sinc resampler.
+  // For each output sample i at continuous source position srcPos = i*ratio:
+  //   - srcBase = floor(srcPos) is the integer anchor in the source buffer
+  //   - frac = srcPos - srcBase is the sub-sample offset (0..1)
+  //   - the sinc kernel is evaluated at the TRUE fractional offset x = (k-half) - frac
+  //   - per-sample normalisation divides by the kernel sum to guarantee unity DC gain
+  for (let i = 0; i < outLen; i++) {
+    const srcPos = i * ratio;
+    const srcBase = Math.floor(srcPos);
+    const frac = srcPos - srcBase;
+    let s = 0, norm = 0;
+    for (let k = 0; k < taps; k++) {
+      const srcIdx = srcBase - half + k;
+      const x = (k - half) - frac;
+      const sincVal = Math.abs(x) < 1e-10 ? 1.0 : Math.sin(PI * cutoff * x) / (PI * x);
+      const winVal = kaiserWindow(k, taps, 8.5);
+      const w = sincVal * winVal;
+      norm += w;
+      if (srcIdx >= 0 && srcIdx < inputData.length) {
+        s += inputData[srcIdx] * w;
+      }
+    }
+    out[i] = norm > 1e-10 ? s / norm : 0.0;
+  }
+  return out;
+}
+
+// pitchShift() removed — pitch shifting is now handled directly inside
+// resampleWindowed() by passing effectiveSrcRate = srcRate * pitchRatio.
+// This gives one high-quality sinc pass instead of linear-interp + sinc.
+
+// --- Recalculate loop points after resampling ---
+function rescaleLoopPoints(loopStart, loopEnd, srcLen, dstLen) {
+  const ratio = dstLen / srcLen;
+  return {
+    start: Math.round(loopStart * ratio),
+    end: Math.min(dstLen - 1, Math.round(loopEnd * ratio)),
+  };
+}
+
+// --- Dither & convert to 16-bit PCM ---
+function floatTo16BitPCM(floatData) {
+  const out = new Int16Array(floatData.length);
+  // TPDF dither
+  for (let i = 0; i < floatData.length; i++) {
+    const dither = (Math.random() - Math.random()) / 32768;
+    const clamped = Math.max(-1, Math.min(1, floatData[i] + dither));
+    out[i] = clamped < 0 ? clamped * 32768 : clamped * 32767;
+  }
+  return out;
+}
+
+// floatTo24BitPCM removed — HQ output is 32-bit float (no intermediate conversion needed)
+
+// ============================================================
+// SECTION 7: WAV BUILDER
+// ============================================================
+function buildWAV(pcmData, sampleRate, channels, bitsPerSample, loopStart, loopEnd, hasLoop, rootNoteMidi) {
+  // pcmData: Int16Array (16-bit), Uint8Array (24-bit packed bytes), or Float32Array (32-bit)
+  const is16 = pcmData instanceof Int16Array;
+  const bytesPerSample = bitsPerSample / 8;
+  const dataSize = pcmData.length * bytesPerSample;
+  const numSamples = dataSize / bytesPerSample / channels;
+  const unityNote = (rootNoteMidi !== null && rootNoteMidi !== undefined) ? rootNoteMidi : 69;
+  const periodNs = Math.round(1e9 / sampleRate);
+
+  // Always write smpl chunk (carries unity note + optional loop).
+  // smpl payload: 9 × uint32 header fields + (1 loop struct of 6 × uint32 if hasLoop)
+  const smplPayload = hasLoop ? 36 + 24 : 36; // 36 = 9 fields × 4 bytes, 24 = 6 loop fields × 4
+  // Always write inst chunk (7 bytes payload, word-padded to 8)
+  const instPayload = 7; // unshiftedNote(1) fineTune(1) gain(1) lowNote(1) highNote(1) lowVel(1) highVel(1)
+  const instPadded = instPayload + (instPayload & 1); // pad to even = 8 bytes
+
+  // Total: RIFF(4)+size(4)+WAVE(4) + fmt(8+16) + smpl(8+smplPayload) + inst(8+instPadded) + data(8+dataSize)
+  const totalSize = 4 + (8+16) + (8+smplPayload) + (8+instPadded) + (8+dataSize);
+  const buf = new ArrayBuffer(8 + totalSize);
+  const view = new DataView(buf);
+  let off = 0;
+
+  const writeStr  = s => { for (const c of s) view.setUint8(off++, c.charCodeAt(0)); };
+  const writeU32  = v => { view.setUint32(off, v >>> 0, true); off += 4; };
+  const writeU16  = v => { view.setUint16(off, v & 0xFFFF, true); off += 2; };
+  const writeU8   = v => { view.setUint8(off++, v & 0xFF); };
+  const writeI8   = v => { view.setInt8(off++, v); };
+
+  // RIFF header
+  writeStr('RIFF');
+  writeU32(totalSize);
+  writeStr('WAVE');
+
+  // fmt chunk
+  writeStr('fmt ');
+  writeU32(16);
+  const isFloat = pcmData instanceof Float32Array;
+  writeU16(isFloat ? 3 : 1); // 1=PCM, 3=IEEE float
+  writeU16(channels);
+  writeU32(sampleRate);
+  writeU32(sampleRate * channels * bytesPerSample); // byte rate
+  writeU16(channels * bytesPerSample);              // block align
+  writeU16(bitsPerSample);
+
+  // smpl chunk — ALWAYS written so unity note is preserved in every output file.
+  // The unity note is set to the TARGET A note (the audio has been pitched there).
+  writeStr('smpl');
+  writeU32(smplPayload);
+  writeU32(0);          // manufacturer
+  writeU32(0);          // product
+  writeU32(periodNs);   // sample period (ns)
+  writeU32(unityNote);  // unity note = target A MIDI note ← KEY FIX
+  writeU32(0);          // pitch fraction
+  writeU32(0);          // SMPTE format
+  writeU32(0);          // SMPTE offset
+  writeU32(hasLoop ? 1 : 0); // num sample loops
+  writeU32(0);          // sampler data (extra bytes after loops)
+  if (hasLoop) {
+    writeU32(0);         // loop id
+    writeU32(0);         // loop type: 0 = forward
+    writeU32(loopStart);
+    writeU32(loopEnd);
+    writeU32(0);         // fraction
+    writeU32(0);         // play count (0 = infinite)
+  }
+
+  // inst chunk — ALWAYS written so DAWs and samplers read the correct root note.
+  // unshiftedNote is the absolute MIDI note at which the sample plays at unity pitch.
+  writeStr('inst');
+  writeU32(instPadded); // chunk size (padded)
+  writeU8(unityNote);   // unshiftedNote = target A MIDI note ← KEY FIX
+  writeI8(0);           // fineTune (cents, 0 = no detune)
+  writeI8(0);           // gain (dB, 0 = unity)
+  writeU8(0);           // low note (0 = C-1, full range)
+  writeU8(127);         // high note (127 = G9, full range)
+  writeU8(0);           // low velocity
+  writeU8(127);         // high velocity
+  writeU8(0);           // padding byte (to reach even chunk size of 8)
+
+  // data chunk
+  writeStr('data');
+  writeU32(dataSize);
+  if (is16) {
+    // 16-bit PCM: Int16Array, 2-byte aligned (off is always even here)
+    new Int16Array(buf, off, pcmData.length).set(pcmData);
+  } else {
+    // 32-bit float: Float32Array, 4-byte aligned (off is always 4-byte aligned here)
+    new Float32Array(buf, off, pcmData.length).set(pcmData);
+  }
+
+  return buf;
+}
+
+// ============================================================
+// SECTION 8: SDS SYSEX BUILDER
+// ============================================================
+function buildSDS(slot, pcm16Data, sampleRate, channels, loopStart, loopEnd, hasLoop, name) {
+  const packets = [];
+  const totalSamples = pcm16Data.length;
+
+  // --- Dump Header ---
+  // F0 7E <dev> 01 <sn_lsb> <sn_msb> <bits_lsb> <bits_msb>
+  // <period_lsb> ... (3 bytes) <length_lsb>...(3 bytes) <loop_start>(3) <loop_end>(3) <loop_type> F7
+  const sn = (slot + SDS_SLOT_OFFSET) & 0x7FFF;
+  const periodNs = Math.round(1e9 / sampleRate);
+  const loopSt = hasLoop ? loopStart : 0xFFFFFF;
+  const loopEn = hasLoop ? loopEnd : 0xFFFFFF;
+
+  const encode3byte = v => [(v & 0x7F), ((v >> 7) & 0x7F), ((v >> 14) & 0x7F)];
+
+  const header = [
+    SDS.HEADER, SDS.MANU_ID, SDS.DEVICE_ID, SDS.DUMP_HEADER,
+    sn & 0x7F, (sn >> 7) & 0x7F,
+    16,   // bits per word — 1 byte only (NOT 2; the extra 0x00 is the classic SDS off-by-one)
+    ...encode3byte(periodNs),
+    ...encode3byte(totalSamples),
+    ...encode3byte(loopSt),
+    ...encode3byte(loopEn),
+    hasLoop ? 0x00 : 0x7F, // loop type: 0=forward, 7F=no loop
+    SDS.EOX
+  ];
+  packets.push({ type: 'header', data: new Uint8Array(header) });
+
+  // --- Data Packets ---
+  // Each packet: F0 7E <dev> 02 <pkt_num> <120 bytes 7-bit encoded> <checksum> F7
+  // 120 bytes = 40 samples × 3 bytes (16-bit sample packed as 3×7-bit)
+  const SAMPLES_PER_PACKET = 40;
+
+  let pktNum = 0;
+  for (let i = 0; i < totalSamples; i += SAMPLES_PER_PACKET) {
+    const chunk = [];
+    for (let j = 0; j < SAMPLES_PER_PACKET; j++) {
+      const s = i + j < totalSamples ? pcm16Data[i + j] : 0;
+      // SDS 16-bit to 3x7-bit packing (MMA spec):
+      // Byte 0: bits 15-9  (u >> 9) & 0x7F
+      // Byte 1: bits  8-2  (u >> 2) & 0x7F
+      // Byte 2: bits  1-0  (u & 0x03) << 5  — placed in bits 6-5
+      // Bug was: (u << 5) & 0x60 which shifted wrong direction, corrupting low bits.
+      // Machinedrum expects OFFSET BINARY, not two's complement.
+      // MCL source confirms: encode_val = sample + (2^bits / 2)
+      // For 16-bit: add 32768 so that silence(0) -> 32768, max+ -> 65535, max- -> 0.
+      // Two's complement (wrong): silence -> [00 00 00], MD hears -32768 = wave-fold!
+      // Offset binary (correct):  silence -> [40 00 00], MD hears 0 = correct.
+      const u = (s + 32768) & 0xFFFF;     // offset binary: shift range 0..65535
+      chunk.push((u >> 9) & 0x7F);        // bits 15-9
+      chunk.push((u >> 2) & 0x7F);        // bits  8-2
+      chunk.push((u & 0x03) << 5);        // bits  1-0 shifted to bits 6-5
+    }
+    // Checksum: XOR of pkt_num and all 120 data bytes
+    let chk = pktNum & 0x7F;
+    for (const b of chunk) chk ^= b;
+    chk &= 0x7F;
+
+    const pkt = new Uint8Array([
+      SDS.HEADER, SDS.MANU_ID, SDS.DEVICE_ID, SDS.DATA_PACKET,
+      pktNum & 0x7F,
+      ...chunk,
+      chk,
+      SDS.EOX
+    ]);
+    packets.push({ type: 'data', pktNum: pktNum & 0x7F, data: pkt });
+    pktNum = (pktNum + 1) & 0x7F;
+  }
+
+  return packets;
+}
+
+// --- Elektron Name SysEx ---
+function buildNameSysEx(slot, name) {
+  const truncated = (name.toUpperCase().replace(/[^A-Z0-9\-_]/g, '').substring(0, 4)).padEnd(4, ' ');
+  const bytes = [];
+  for (const c of truncated) bytes.push(c.charCodeAt(0));
+  return new Uint8Array([
+    ...ELEKTRON_NAME_PREFIX,
+    (slot + SDS_SLOT_OFFSET) & 0x7F,
+    ...bytes,
+    SDS.EOX
+  ]);
+}
+
+// Flatten all SDS packets for a slot into one Uint8Array (for .syx download)
+function flattenSDS(packets, nameSysEx) {
+  const parts = [nameSysEx, ...packets.map(p => p.data)];
+  const total = parts.reduce((s, a) => s + a.length, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const p of parts) { out.set(p, offset); offset += p.length; }
+  return out;
+}
+
+// ============================================================
+// SECTION 9: CORE PROCESSING PIPELINE
+// ============================================================
+async function processItem(item, settings) {
+  setStatus(`Processing: ${item.name}…`, true);
+  item.status = 'processing';
+  renderSourceItem(item);
+
+  const wav = parseWAV(item.rawBuffer);
+  if (wav.errors.length) {
+    item.status = 'error';
+    item.error = wav.errors.join(', ');
+    renderSourceItem(item);
+    setStatus(`Error: ${item.name} — ${item.error}`, false, 'err');
+    return;
+  }
+
+  // Warn about unsupported loop types
+  if (wav.hasLoop && wav.loopType !== 0) {
+    const typeNames = { 1: 'ping-pong', 2: 'reverse' };
+    const typeName = typeNames[wav.loopType] || `type ${wav.loopType}`;
+    const proceed = await confirmDialog(
+      'Loop Type Warning',
+      `"${item.name}" has a ${typeName} loop. The Machinedrum only supports forward loops. Convert to forward loop and continue?`
+    );
+    if (!proceed) { item.status = 'idle'; renderSourceItem(item); return; }
+  }
+
+  // Determine root note — read from smpl and inst chunks independently
+  const smplNote = wav.rootNoteSmpl; // from smpl chunk unity note (or null)
+  const instNote = wav.rootNoteInst; // from inst chunk unshiftedNote (or null)
+  let rootMidi = null;
+
+  if (smplNote !== null && instNote !== null && smplNote !== instNote) {
+    // Both chunks present but disagree — ask user which to trust
+    rootMidi = await askRootNoteConflict(item.name, smplNote, instNote);
+  } else if (smplNote !== null) {
+    rootMidi = smplNote;
+  } else if (instNote !== null) {
+    rootMidi = instNote;
+  } else {
+    // Neither chunk has a root note — ask user
+    rootMidi = await askRootNote(item.name);
+  }
+
+  if (rootMidi === null) { item.status = 'idle'; renderSourceItem(item); return; }
+  item.rootNote = rootMidi;
+
+  // Step 1: Mono mixdown (before pitch shift)
+  let { data: monoData, channels: outChannels } = toMono(wav.audioData, wav.channels, settings.monoMode);
+  if (settings.monoMode !== 'stereo') outChannels = 1;
+
+  // Steps 2+3 combined: pitch shift + resample in ONE sinc pass.
+  // Pitch shifting IS resampling at a different ratio. Doing it as a separate
+  // linear-interpolation step first then sinc-resampling introduces aliasing
+  // for large shifts. Instead we pass an "effective source rate" to the sinc:
+  //
+  //   effectiveSrcRate = srcRate * pitchRatio
+  //
+  // where pitchRatio = 2^(semitones/12). The sinc resamples from this effective
+  // rate to dstRate in one pass — correct pitch AND correct rate, no aliasing.
+  //
+  // Examples:
+  //   root=C4(60), target=A4(69), srcRate=44100, dstRate=44100:
+  //     semitones=+9, pitchRatio=1.6818, effectiveSrc=74163
+  //     outLen = round(N * 44100/74163) = round(N * 0.5946) → shorter → higher pitch ✓
+  //   root=A4(69), target=A4(69), srcRate=22050, dstRate=44100:
+  //     semitones=0, pitchRatio=1.0, effectiveSrc=22050
+  //     outLen = round(N * 44100/22050) = N*2 → standard 2× upsample ✓
+
+  const targetMidi = 69 + (parseInt(settings.targetOctave) - 4) * 12; // A4=69
+  const semitones = targetMidi - rootMidi;
+  const pitchRatio = Math.pow(2, semitones / 12);
+  const taps = parseInt(settings.sincTaps);
+  const dstRate = settings.targetSampleRate;
+  const srcRate = wav.sampleRate;
+  // Effective source rate encodes the pitch shift into the resample ratio
+  const effectiveSrcRate = srcRate * pitchRatio;
+
+  // MD-ready: pitch + resample in one sinc pass
+  const resampledData = resampleWindowed(monoData, effectiveSrcRate, dstRate, taps);
+
+  // HQ download: same combined pass to 2× dstRate
+  const hqData = resampleWindowed(monoData, effectiveSrcRate, dstRate * 2, taps);
+
+  // Step 4: Recalculate loop points
+  // Loop points from smpl chunk are in original FRAME units (same as wav.numSamples).
+  // The combined pitch+resample changes the frame count from wav.numSamples to
+  // resampledData.length. We scale loop points by this same ratio.
+  // Using resampledData.length / wav.numSamples captures BOTH the pitch shift
+  // AND the rate conversion in one ratio — sample-accurate.
+  let loopStart = 0, loopEnd = resampledData.length - 1, hasLoop = false;
+  if (wav.hasLoop && wav.numSamples > 0) {
+    // Clamp source loop points to valid range before scaling
+    const srcLoopStart = Math.max(0, Math.min(wav.numSamples - 1, wav.loopStart));
+    const srcLoopEnd   = Math.max(0, Math.min(wav.numSamples - 1, wav.loopEnd));
+    const scaled = rescaleLoopPoints(srcLoopStart, srcLoopEnd, wav.numSamples, resampledData.length);
+    loopStart = scaled.start;
+    loopEnd = scaled.end;
+    hasLoop = true;
+  }
+  if (item.overrideLoop) {
+    loopStart = item.loopStart;
+    loopEnd = item.loopEnd;
+    hasLoop = item.hasLoop;
+  }
+  item.loopStart = loopStart;
+  item.loopEnd = loopEnd;
+  item.hasLoop = hasLoop;
+
+  // Step 5: Dither to 16-bit
+  const pcm16 = floatTo16BitPCM(resampledData);
+
+  // Build output buffers
+  // Use targetMidi (the A-key we pitched TO) as the unity note in smpl/inst chunks —
+  // NOT rootMidi (the original source root). The audio is now at targetMidi pitch.
+  item.processedBuffer = buildWAV(pcm16, dstRate, outChannels, 16, loopStart, loopEnd, hasLoop, targetMidi);
+  // HQ: 32-bit float WAV at 2× target rate — maximum quality for external use.
+  // hqData is already a Float32Array from resampleWindowed. Pass directly.
+  item.hqBuffer = buildWAV(hqData, dstRate * 2, outChannels, 32,
+    Math.round(loopStart * 2),
+    Math.round(loopEnd * 2),
+    hasLoop, targetMidi);
+  item.pcm16 = pcm16;
+  item.processedSampleRate = dstRate;
+  item.processedChannels = outChannels;
+  item.size = item.processedBuffer.byteLength;
+  item.targetMidi = targetMidi;  // the A-key we pitched to — shown in UI
+
+  // Build SDS packets
+  const slotIdx = state.slots.indexOf(item.id);
+  const nameStr = item.name.replace(/\.wav$/i, '');
+  item.sdsMeta = { slot: slotIdx >= 0 ? slotIdx : 0, name: nameStr, loopStart, loopEnd, hasLoop, rootMidi, dstRate, outChannels };
+  item.sdsPackets = buildSDS(item.sdsMeta.slot, pcm16, dstRate, outChannels, loopStart, loopEnd, hasLoop, nameStr);
+  item.nameSysEx = buildNameSysEx(item.sdsMeta.slot, nameStr);
+  item.syxData = flattenSDS(item.sdsPackets, item.nameSysEx);
+
+  item.status = 'done';
+  renderSourceItem(item);
+  updateMemGauge();
+  setStatus(`Done: ${item.name} — ${fmtBytes(item.size)} @ ${fmtRate(dstRate)}, ${semitones >= 0 ? '+' : ''}${semitones} semi`);
+}
+
+async function processItems(items) {
+  const settings = getSettings();
+  setSpinner(true);
+  for (const item of items) {
+    if (item.status === 'processing') continue;
+    await processItem(item, settings);
+    await sleep(4); // yield to UI
+  }
+  setSpinner(false);
+  renderSourceList();
+  updateMemGauge();
+}
+
+function getSettings() {
+  let rate = parseInt(dom.targetSampleRate.value);
+  if (dom.targetSampleRate.value === 'custom') rate = parseInt(dom.customSampleRate.value) || 44100;
+  return {
+    targetOctave: dom.targetOctave.value,
+    targetSampleRate: rate,
+    monoMode: dom.monoMode.value,
+    sincTaps: dom.sincTaps.value,
+  };
+}
+
+// ============================================================
+// SECTION 10: FILE LOADING
+// ============================================================
+async function handleFiles(files) {
+  const wavFiles = Array.from(files).filter(f => f.name.toLowerCase().endsWith('.wav'));
+  if (!wavFiles.length) { setStatus('No WAV files found', false, 'warn'); return; }
+
+  const newItems = [];
+  for (const file of wavFiles) {
+    const buf = await file.arrayBuffer();
+    // Quick pre-parse to get source file metadata for display
+    const preview = parseWAV(buf);
+    const srcRootNote = preview.rootNoteSmpl ?? preview.rootNoteInst ?? null;
+    const item = {
+      id: nextId++,
+      name: file.name,
+      rawBuffer: buf,
+      processedBuffer: null,
+      hqBuffer: null,
+      pcm16: null,
+      syxData: null,
+      sdsPackets: null,
+      nameSysEx: null,
+      rootNote: srcRootNote,   // source root note for display before processing
+      targetMidi: null,        // set after processing
+      loopStart: 0,
+      loopEnd: 0,
+      hasLoop: false,
+      overrideLoop: false,
+      status: 'idle',
+      size: buf.byteLength,
+      error: null,
+      // srcInfo: source file metadata shown in the UI before/after processing
+      srcInfo: {
+        sampleRate: preview.sampleRate || null,
+        hasLoop:    preview.hasLoop,
+        loopStart:  preview.loopStart,
+        loopEnd:    preview.loopEnd,
+        rootNote:   srcRootNote,
+      },
+    };
+    state.sourceFiles.push(item);
+    newItems.push(item);
+  }
+
+  renderSourceList();
+  dom.sourceDropZone.classList.remove('empty');
+
+  if (newItems.length === 1) {
+    // Single file: process immediately
+    await processItems(newItems);
+  } else {
+    // Multiple files: show banner
+    dom.batchBanner.classList.add('visible');
+    dom.batchMsg.textContent = `⬡ ${newItems.length} files queued — click GO to process all`;
+  }
+}
+
+// ============================================================
+// SECTION 11: SOURCE LIST RENDERING
+// ============================================================
+function renderSourceList() {
+  dom.sourceList.innerHTML = '';
+  state.sourceFiles.forEach(item => renderSourceItem(item, true));
+  if (state.sourceFiles.length === 0) dom.sourceDropZone.classList.add('empty');
+  else dom.sourceDropZone.classList.remove('empty');
+}
+
+function renderSourceItem(item, append = false) {
+  const existing = document.getElementById(`src-${item.id}`);
+  const el = existing || document.createElement('li');
+
+  el.id = `src-${item.id}`;
+  el.className = 'sample-item' + (state.selectedSourceIds.has(item.id) ? ' selected' : '') + (item.status === 'processing' ? ' processing' : '');
+  el.draggable = true;
+
+  const statusTag = item.status === 'done' ? '<span class="tag ok">READY</span>'
+    : item.status === 'processing' ? '<span class="tag warn">PROC…</span>'
+    : item.status === 'error' ? `<span class="tag err">ERR</span>`
+    : '<span class="tag">RAW</span>';
+
+  // Show source-file info before processing, output info after.
+  // item.srcInfo is populated from parseWAV during handleFiles (before processing).
+  const done = item.status === 'done';
+  const src = item.srcInfo || {};
+
+  // Size: show output PCM data size (without WAV header) when done,
+  // otherwise raw file size.
+  const sizeStr = done && item.processedBuffer
+    ? fmtBytes(item.pcm16 ? item.pcm16.byteLength : item.processedBuffer.byteLength) + ' (out)'
+    : fmtBytes(item.rawBuffer.byteLength) + ' (src)';
+
+  // Sample rate: show "srcRate → dstRate" when done and rates differ, else just the relevant rate.
+  const srcRate  = src.sampleRate  || null;
+  const dstRate  = item.processedSampleRate || null;
+  const rateStr  = done && dstRate
+    ? (srcRate && srcRate !== dstRate ? fmtRate(srcRate) + '→' + fmtRate(dstRate) : fmtRate(dstRate))
+    : srcRate ? fmtRate(srcRate) : '—';
+
+  // Root note: show "srcRoot → targetA" when done and transposition happened,
+  // otherwise show the source root (or — if unknown).
+  const srcRoot   = item.rootNote;   // original root read from file
+  const targetA   = item.targetMidi; // target A note after processing
+  const rootStr   = done && targetA !== undefined
+    ? (srcRoot !== null && srcRoot !== targetA
+        ? midiToNote(srcRoot) + '→' + midiToNote(targetA)
+        : midiToNote(targetA))
+    : (srcRoot !== null ? midiToNote(srcRoot) : '—');
+
+  // Loop: show output loop points when done, source loop info before.
+  const loopStr = done
+    ? (item.hasLoop ? `LOOP ${item.loopStart}–${item.loopEnd}` : 'NO LOOP')
+    : (src.hasLoop  ? `SRC LOOP ${src.loopStart}–${src.loopEnd}` : 'NO LOOP');
+
+  el.innerHTML = `
+    <div class="sample-drag-handle">⋮⋮</div>
+    <div class="sample-main">
+      <div class="sample-name" title="${item.name}">${item.name}</div>
+      <div class="sample-meta">
+        ${statusTag}
+        <span>${sizeStr}</span>
+        <span>${rateStr}</span>
+        <span>Root: ${rootStr}</span>
+        <span>${loopStr}</span>
+        ${item.error ? `<span class="tag err">${item.error}</span>` : ''}
+      </div>
+    </div>
+    <div class="sample-actions">
+      ${item.status === 'done' ? `<button class="btn btn-ghost btn-icon src-play-btn${state.playingItemId === item.id ? ' playing' : ''}" title="${state.playingItemId === item.id ? 'Stop' : 'Play'}" data-action="play" data-id="${item.id}">${state.playingItemId === item.id ? '■' : '▶'}</button>` : ''}
+      ${item.status === 'done' ? `<button class="btn btn-ghost btn-icon" title="Edit loop points" data-action="preview" data-id="${item.id}">✎</button>` : ''}
+      <button class="btn btn-ghost btn-icon" title="Remove" data-action="remove" data-id="${item.id}">✕</button>
+    </div>
+    ${item.status === 'processing' ? `<div class="sample-progress" style="width:60%"></div>` : ''}
+  `;
+
+  el.addEventListener('click', e => {
+    if (e.target.dataset.action) return;
+    toggleSelectSource(item.id);
+  });
+  el.addEventListener('dragstart', e => {
+    e.dataTransfer.setData('text/plain', String(item.id));
+    el.classList.add('dragging');
+  });
+  el.addEventListener('dragend', () => el.classList.remove('dragging'));
+
+  if (!existing && append) dom.sourceList.appendChild(el);
+  else if (existing) existing.replaceWith(el);
+}
+
+function toggleSelectSource(id) {
+  if (state.selectedSourceIds.has(id)) state.selectedSourceIds.delete(id);
+  else state.selectedSourceIds.add(id);
+  renderSourceList();
+}
+
+// ============================================================
+// SECTION 12: SLOT GRID RENDERING
+// ============================================================
+function renderSlotGrid() {
+  const cfg = getHWConfig();
+  dom.slotGrid.innerHTML = '';
+  for (let i = 0; i < cfg.slots; i++) {
+    const sid = state.slots[i];
+    const item = sid ? state.sourceFiles.find(f => f.id === sid) : null;
+    const el = document.createElement('div');
+    el.className = 'slot-item' +
+      (sid ? ' occupied' : '') +
+      (state.selectedSlotIndices.has(i) ? ' selected-slot' : '');
+    el.dataset.slot = i;
+
+    // Slot number displayed as 1-based (internal index stays 0-based)
+    const displayNum = String(i + 1).padStart(2, '0');
+    const shortName  = item ? item.name.replace(/\.wav$/i, '').substring(0, 4).toUpperCase() : '';
+    const detail     = item
+      ? `${fmtBytes(item.size || 0)}${item.processedSampleRate ? '  ' + fmtRate(item.processedSampleRate) : ''}`
+      : '';
+
+    el.innerHTML = `
+      <span class="slot-num">${displayNum}</span>
+      <div class="slot-name ${sid ? '' : 'empty'}">${sid ? shortName : '—'}</div>
+      <div class="slot-detail">${detail}</div>
+      <div class="slot-actions">
+        ${sid ? `<button class="slot-play-btn${state.playingItemId === sid ? ' playing' : ''}" data-slot="${i}" title="${state.playingItemId === sid ? 'Stop' : 'Play'}">${state.playingItemId === sid ? '■' : '▶'}</button>` : ''}
+        ${sid ? `<button class="slot-edit-btn" data-slot="${i}" title="Edit loop points">✎</button>` : ''}
+        ${sid ? `<button class="slot-clear-btn" data-slot="${i}" title="Clear slot">✕</button>` : ''}
+      </div>
+    `;
+
+    el.addEventListener('click', e => {
+      const btn = e.target.closest('button');
+      if (btn) {
+        const slotIdx = parseInt(btn.dataset.slot);
+        if (btn.classList.contains('slot-clear-btn')) { clearSlot(slotIdx); return; }
+        if (btn.classList.contains('slot-play-btn'))  { playSlotInline(slotIdx); return; }
+        if (btn.classList.contains('slot-edit-btn'))  { previewSlot(slotIdx); return; }
+      }
+      toggleSelectSlot(i);
+    });
+    el.addEventListener('dragover',  e => { e.preventDefault(); el.classList.add('drop-target'); });
+    el.addEventListener('dragleave', ()  => el.classList.remove('drop-target'));
+    el.addEventListener('drop', e => {
+      e.preventDefault();
+      el.classList.remove('drop-target');
+      const id = parseInt(e.dataTransfer.getData('text/plain'));
+      assignToSlot(id, i);
+    });
+
+    dom.slotGrid.appendChild(el);
+  }
+}
+
+function previewSlot(slotIndex) {
+  const sid = state.slots[slotIndex];
+  if (!sid) return;
+  const item = state.sourceFiles.find(f => f.id === sid);
+  if (!item || !item.pcm16) { setStatus('Process sample before previewing', false, 'warn'); return; }
+  openPlayer(item);
+}
+
+async function playItemInline(item) {
+  if (!item || !item.pcm16) { setStatus('Process sample before playing', false, 'warn'); return; }
+  // Toggle: if already playing this item, stop it
+  if (state.playingItemId === item.id) {
+    stopInlinePlayback();
+    return;
+  }
+  // Stop anything else that is playing
+  if (state.playingItemId !== null) stopInlinePlayback();
+  // Set state BEFORE rendering so buttons show ■ immediately
+  state.playerItem        = item;
+  state.playingItemId     = item.id;
+  dom.loopStart.value     = item.loopStart;
+  dom.loopEnd.value       = item.loopEnd;
+  dom.loopEnabled.checked = item.hasLoop;
+  renderSlotGrid();
+  renderSourceList();
+  // Start playback — playAudio no longer calls stopAudio internally
+  await playAudio(item.hasLoop);
+  // playerSourceNode now exists — attach onended to revert buttons when done
+  if (playerSourceNode) {
+    playerSourceNode.onended = () => {
+      if (state.playingItemId === item.id) stopInlinePlayback();
+    };
+  }
+  setStatus(`Playing: ${item.name}`);
+}
+
+function playSlotInline(slotIndex) {
+  const sid = state.slots[slotIndex];
+  if (!sid) return;
+  const item = state.sourceFiles.find(f => f.id === sid);
+  playItemInline(item);
+}
+
+function toggleSelectSlot(i) {
+  if (state.selectedSlotIndices.has(i)) state.selectedSlotIndices.delete(i);
+  else state.selectedSlotIndices.add(i);
+  renderSlotGrid();
+}
+
+function assignToSlot(sampleId, slotIndex) {
+  const item = state.sourceFiles.find(f => f.id === sampleId);
+  if (!item) return;
+  if (item.status !== 'done') {
+    setStatus(`Process "${item.name}" before assigning to slot`, false, 'warn');
+    return;
+  }
+  state.slots[slotIndex] = sampleId;
+  // Update SDS packets with correct slot number
+  rebuildSDS(item, slotIndex);
+  renderSlotGrid();
+  updateMemGauge();
+  setStatus(`Assigned "${item.name}" → slot ${slotIndex}`);
+}
+
+function rebuildSDS(item, slot) {
+  if (!item.pcm16) return;
+  const nameStr = item.name.replace(/\.wav$/i, '');
+  item.sdsPackets = buildSDS(slot, item.pcm16, item.processedSampleRate, item.processedChannels,
+    item.loopStart, item.loopEnd, item.hasLoop, nameStr);
+  item.nameSysEx = buildNameSysEx(slot, nameStr);
+  item.syxData = flattenSDS(item.sdsPackets, item.nameSysEx);
+}
+
+function clearSlot(i) {
+  state.slots[i] = null;
+  state.selectedSlotIndices.delete(i);
+  renderSlotGrid();
+  updateMemGauge();
+}
+
+// ============================================================
+// SECTION 13: PLAYER / LOOP EDITOR
+// ============================================================
+let playerAudioCtx = null;
+let playerSourceNode = null;
+let playerAudioBuffer = null;
+
+function openPlayer(item) {
+  if (!item || !item.processedBuffer) { setStatus('Process the sample first', false, 'warn'); return; }
+  state.playerItem = item;
+  dom.playerFileName.textContent = item.name;
+  dom.loopStart.value = item.loopStart;
+  dom.loopEnd.value = item.loopEnd;
+  dom.loopEnabled.checked = item.hasLoop;
+
+  // Parse processedBuffer to get sampleRate for display
+  const view = new DataView(item.processedBuffer);
+  const sr = view.getUint32(24, true);
+  dom.playerSampleRate.textContent = fmtRate(sr) + ' · ' + (item.processedChannels === 1 ? 'Mono' : 'Stereo');
+  dom.loopEnd.max = (item.pcm16 ? item.pcm16.length - 1 : 0);
+  dom.loopStart.max = dom.loopEnd.value;
+
+  drawWaveform(item);
+  dom.playerModal.classList.add('open');
+}
+
+function drawWaveform(item) {
+  const canvas = dom.waveform;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  if (!item.pcm16) return;
+  const data = item.pcm16;
+  const len = data.length;
+
+  // Background
+  ctx.fillStyle = '#181c22';
+  ctx.fillRect(0, 0, W, H);
+
+  // Grid lines
+  ctx.strokeStyle = '#2a3040';
+  ctx.lineWidth = 1;
+  for (let y = H * 0.25; y < H; y += H * 0.25) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  }
+
+  // Loop region
+  if (item.hasLoop && item.loopEnd > item.loopStart) {
+    const x1 = (item.loopStart / len) * W;
+    const x2 = (item.loopEnd / len) * W;
+    ctx.fillStyle = '#30c06018';
+    ctx.fillRect(x1, 0, x2 - x1, H);
+    ctx.strokeStyle = '#30c06060';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x1, 0); ctx.lineTo(x1, H); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x2, 0); ctx.lineTo(x2, H); ctx.stroke();
+  }
+
+  // Waveform
+  const samplesPerPixel = Math.max(1, Math.floor(len / W));
+  ctx.strokeStyle = '#e8a020';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let px = 0; px < W; px++) {
+    let min = 1, max = -1;
+    const start = Math.floor(px * len / W);
+    const end = Math.min(len, start + samplesPerPixel);
+    for (let i = start; i < end; i++) {
+      const v = data[i] / 32768;
+      if (v < min) min = v;
+      if (v > max) max = v;
+    }
+    const y1 = (1 - max) * H / 2;
+    const y2 = (1 - min) * H / 2;
+    if (px === 0) ctx.moveTo(px, (y1 + y2) / 2);
+    ctx.lineTo(px, y1);
+    ctx.lineTo(px, y2);
+  }
+  ctx.stroke();
+
+  // Center line
+  ctx.strokeStyle = '#3a455880';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, H/2); ctx.lineTo(W, H/2); ctx.stroke();
+}
+
+async function playAudio(looping) {
+  // Note: do NOT call stopAudio() here — playItemInline handles stop/state before calling us.
+  const item = state.playerItem;
+  if (!item?.pcm16) return;
+
+  const sr = item.processedSampleRate;
+  const pcm = item.pcm16;
+
+  if (!playerAudioCtx || playerAudioCtx.sampleRate !== sr) {
+    if (playerAudioCtx) playerAudioCtx.close();
+    playerAudioCtx = new AudioContext({ sampleRate: sr });
+  }
+  if (playerAudioCtx.state === 'suspended') await playerAudioCtx.resume();
+
+  const ls = parseInt(dom.loopStart.value);
+  const le = parseInt(dom.loopEnd.value);
+  const hasLoop = looping && dom.loopEnabled.checked && le > ls;
+
+  let playData;
+  if (hasLoop) {
+    // Pre-render the loop manually into a flat buffer: play up to loopEnd,
+    // then repeat the loop region [ls..le] for ~8 seconds total.
+    // This completely avoids the Web Audio API's floating-point loop boundary,
+    // which cannot land on an exact integer sample and causes a click every cycle.
+    const loopLen   = le - ls;                       // samples in one loop cycle
+    const preLen    = le;                             // samples before first loop point
+    const targetLen = sr * 8;                         // 8 seconds total playback
+    const loopsNeeded = Math.ceil((targetLen - preLen) / loopLen);
+    const totalLen  = preLen + loopsNeeded * loopLen;
+
+    playData = new Float32Array(totalLen);
+    // Pre-loop section (sample 0 → loopEnd)
+    for (let i = 0; i < preLen; i++) {
+      playData[i] = pcm[i] / 32768.0;
+    }
+    // Loop cycles — copy exact integer sample ranges, no interpolation
+    for (let rep = 0; rep < loopsNeeded; rep++) {
+      const outBase = preLen + rep * loopLen;
+      for (let i = 0; i < loopLen; i++) {
+        playData[outBase + i] = pcm[ls + i] / 32768.0;
+      }
+    }
+  } else {
+    // No loop — just play the whole sample straight through
+    playData = new Float32Array(pcm.length);
+    for (let i = 0; i < pcm.length; i++) {
+      playData[i] = pcm[i] / 32768.0;
+    }
+  }
+
+  playerAudioBuffer = playerAudioCtx.createBuffer(1, playData.length, sr);
+  playerAudioBuffer.getChannelData(0).set(playData);
+
+  playerSourceNode = playerAudioCtx.createBufferSource();
+  playerSourceNode.buffer = playerAudioBuffer;
+  playerSourceNode.connect(playerAudioCtx.destination);
+  playerSourceNode.loop = false; // no API loop — we pre-rendered it
+  playerSourceNode.start();
+}
+
+function stopAudio() {
+  if (playerSourceNode) {
+    try { playerSourceNode.stop(); } catch(e) {}
+    playerSourceNode = null;
+  }
+}
+
+// Stop inline playback and update buttons
+function stopInlinePlayback() {
+  stopAudio();
+  state.playingItemId = null;
+  renderSlotGrid();
+  renderSourceList();
+  setStatus('Stopped');
+}
+
+// ============================================================
+// SECTION 14: MIDI / SDS TRANSFER
+// ============================================================
+async function initMIDI() {
+  if (!navigator.requestMIDIAccess) {
+    dom.midiDot.className = 'midi-dot error';
+    dom.midiLabel.textContent = 'MIDI N/A';
+    setStatus('WebMIDI not supported in this browser', false, 'err');
+    return;
+  }
+  try {
+    state.midiAccess = await navigator.requestMIDIAccess({ sysex: true });
+    populateMIDIPorts();
+    state.midiAccess.onstatechange = populateMIDIPorts;
+    dom.midiDot.className = 'midi-dot connected';
+    dom.midiLabel.textContent = 'MIDI OK';
+    setStatus('WebMIDI connected');
+  } catch (e) {
+    dom.midiDot.className = 'midi-dot error';
+    dom.midiLabel.textContent = 'MIDI DENIED';
+    setStatus('MIDI access denied — enable SysEx permissions', false, 'err');
+  }
+}
+
+function populateMIDIPorts() {
+  if (!state.midiAccess) return;
+  const sel = dom.midiPortSelect;
+  const current = sel.value;
+  sel.innerHTML = '<option value="">— none —</option>';
+  for (const [id, port] of state.midiAccess.outputs) {
+    const opt = document.createElement('option');
+    opt.value = id;
+    opt.textContent = port.name;
+    if (id === current) opt.selected = true;
+    sel.appendChild(opt);
+  }
+  if (!sel.value && state.midiAccess.outputs.size > 0) {
+    sel.selectedIndex = 1;
+  }
+  updateMIDIOutput();
+}
+
+function updateMIDIOutput() {
+  const id = dom.midiPortSelect.value;
+  state.midiOutput = id && state.midiAccess ? state.midiAccess.outputs.get(id) : null;
+  dom.midiLabel.textContent = state.midiOutput ? state.midiOutput.name.substring(0, 14) : 'NO PORT';
+}
+
+async function sendSDS(slots) {
+  if (!state.midiOutput) { setStatus('Select a MIDI port first', false, 'warn'); return; }
+  if (state.isSending) return;
+
+  const items = slots
+    .filter(i => state.slots[i] !== null)
+    .map(i => ({ slot: i, item: state.sourceFiles.find(f => f.id === state.slots[i]) }))
+    .filter(x => x.item && x.item.status === 'done');
+
+  if (!items.length) { setStatus('No processed samples in selected slots', false, 'warn'); return; }
+
+  state.isSending = true;
+  state.abortSend = false;
+  dom.btnSendAll.disabled = true;
+  dom.btnSendSelected.disabled = true;
+  dom.btnAbortSend.style.display = '';
+  dom.sendProgressBar.style.display = '';
+  dom.sendProgressFill.style.width = '0%';
+
+  const turbo = parseInt(dom.turboSpeed.value);
+  const closedLoop = dom.sdsHandshake.value === 'closed';
+  const baseDelay = Math.round(SDS.PACKET_DELAY_MS / turbo);
+
+  dom.turboIndicator.className = 'turbo-indicator' + (turbo > 1 ? ' active' : '');
+  dom.turboIndicator.textContent = `${turbo}× ${turbo > 1 ? 'TURBO' : 'STD'}`;
+
+  let totalPackets = items.reduce((s, x) => s + (x.item.sdsPackets?.length || 0), 0);
+  let sent = 0;
+
+  setStatus(`Sending ${items.length} sample(s) via SDS…`, true);
+
+  for (const { slot, item } of items) {
+    if (state.abortSend) break;
+    // Rebuild SDS with correct slot
+    rebuildSDS(item, slot);
+    setStatus(`Sending slot ${slot}: ${item.name} (${item.sdsPackets.length} packets)`, true);
+
+    // Send name SysEx first
+    state.midiOutput.send(item.nameSysEx);
+    await sleep(baseDelay);
+
+    // Send header packet
+    const headerPkt = item.sdsPackets.find(p => p.type === 'header');
+    if (headerPkt) {
+      state.midiOutput.send(headerPkt.data);
+      await sleep(baseDelay);
+    }
+
+    // Send data packets
+    const dataPackets = item.sdsPackets.filter(p => p.type === 'data');
+    for (const pkt of dataPackets) {
+      if (state.abortSend) break;
+
+      state.midiOutput.send(pkt.data);
+      sent++;
+      dom.sendProgressFill.style.width = (sent / totalPackets * 100) + '%';
+
+      if (closedLoop) {
+        // Wait for ACK/NAK — with timeout fallback
+        const ack = await waitForACK(item.sdsMeta?.slot ?? slot, pkt.pktNum, 500);
+        if (ack === 'nak') {
+          // Resend once
+          state.midiOutput.send(pkt.data);
+          await sleep(baseDelay);
+        } else if (ack === 'timeout') {
+          // Fall back to open-loop with delay
+          await sleep(baseDelay * 2);
+        }
+      } else {
+        await sleep(baseDelay);
+      }
+    }
+  }
+
+  state.isSending = false;
+  dom.btnSendAll.disabled = false;
+  dom.btnSendSelected.disabled = false;
+  dom.btnAbortSend.style.display = 'none';
+  dom.sendProgressFill.style.width = '100%';
+  setTimeout(() => { dom.sendProgressBar.style.display = 'none'; }, 1500);
+  setStatus(state.abortSend ? 'Transfer aborted' : 'Transfer complete', false, state.abortSend ? 'warn' : 'ok');
+  setSpinner(false);
+}
+
+function waitForACK(slotNum, pktNum, timeoutMs) {
+  return new Promise(resolve => {
+    if (!state.midiAccess) { resolve('timeout'); return; }
+    const timer = setTimeout(() => { cleanup(); resolve('timeout'); }, timeoutMs);
+
+    function onMessage(e) {
+      const d = e.data;
+      if (d.length >= 6 && d[0] === SDS.HEADER && d[1] === SDS.MANU_ID) {
+        if (d[3] === SDS.ACK) { cleanup(); resolve('ack'); }
+        else if (d[3] === SDS.NAK) { cleanup(); resolve('nak'); }
+        else if (d[3] === SDS.CANCEL) { cleanup(); resolve('cancel'); }
+      }
+    }
+    function cleanup() {
+      clearTimeout(timer);
+      for (const [, input] of state.midiAccess.inputs) input.onmidimessage = null;
+    }
+    for (const [, input] of state.midiAccess.inputs) input.onmidimessage = onMessage;
+  });
+}
+
+// ============================================================
+// SECTION 15: DOWNLOAD HELPERS
+// ============================================================
+function downloadBuffer(buffer, filename, mime = 'audio/wav') {
+  const blob = new Blob([buffer], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+function downloadSelected(type) {
+  const selected = state.sourceFiles.filter(f => state.selectedSourceIds.has(f.id));
+  const targets = selected.length ? selected : state.sourceFiles.filter(f => f.status === 'done');
+  if (!targets.length) { setStatus('No processed samples to download', false, 'warn'); return; }
+  for (const item of targets) {
+    const base = item.name.replace(/\.wav$/i, '');
+    if (type === 'wav' && item.processedBuffer) downloadBuffer(item.processedBuffer, `${base}_md.wav`);
+    else if (type === 'hq' && item.hqBuffer) downloadBuffer(item.hqBuffer, `${base}_hq.wav`);
+    else if (type === 'syx' && item.syxData) downloadBuffer(item.syxData, `${base}.syx`, 'application/octet-stream');
+    else setStatus(`No ${type.toUpperCase()} data — process first`, false, 'warn');
+  }
+}
+
+// ============================================================
+// SECTION 16: MODALS & PROMPTS
+// ============================================================
+function askRootNote(filename) {
+  return new Promise(resolve => {
+    dom.rootNoteModalMsg.textContent = `No root note found in "${filename}". Select the root note:`;
+
+    // Build dropdown: C0–G8, all 128 MIDI notes
+    const sel = document.getElementById('rootNoteSelect');
+    sel.innerHTML = '';
+    for (let midi = 0; midi <= 127; midi++) {
+      const opt = document.createElement('option');
+      opt.value = midi;
+      opt.textContent = `${midiToNote(midi)}  (MIDI ${midi})`;
+      if (midi === 69) opt.selected = true; // default A4
+      sel.appendChild(opt);
+    }
+
+    dom.rootNoteModal.classList.add('open');
+
+    dom.btnRootConfirm.onclick = () => {
+      dom.rootNoteModal.classList.remove('open');
+      resolve(parseInt(sel.value));
+    };
+    dom.btnRootCancel.onclick = () => {
+      dom.rootNoteModal.classList.remove('open');
+      resolve(null);
+    };
+  });
+}
+
+function askRootNoteConflict(filename, smplNote, instNote) {
+  return new Promise(resolve => {
+    dom.rootNoteModalMsg.textContent =
+      `"${filename}" has conflicting root notes:
+` +
+      `smpl chunk: ${midiToNote(smplNote)} (MIDI ${smplNote})  |  ` +
+      `inst chunk: ${midiToNote(instNote)} (MIDI ${instNote})
+Which should be used?`;
+
+    // Repurpose the select as two big option buttons instead
+    const sel = document.getElementById('rootNoteSelect');
+    sel.innerHTML = '';
+    const optSmpl = document.createElement('option');
+    optSmpl.value = smplNote;
+    optSmpl.textContent = `smpl chunk — ${midiToNote(smplNote)} (MIDI ${smplNote})`;
+    optSmpl.selected = true;
+    const optInst = document.createElement('option');
+    optInst.value = instNote;
+    optInst.textContent = `inst chunk — ${midiToNote(instNote)} (MIDI ${instNote})`;
+    sel.appendChild(optSmpl);
+    sel.appendChild(optInst);
+
+    dom.rootNoteModal.classList.add('open');
+
+    dom.btnRootConfirm.onclick = () => {
+      dom.rootNoteModal.classList.remove('open');
+      resolve(parseInt(sel.value));
+    };
+    dom.btnRootCancel.onclick = () => {
+      dom.rootNoteModal.classList.remove('open');
+      resolve(null);
+    };
+  });
+}
+
+function confirmDialog(title, msg) {
+  return new Promise(resolve => {
+    dom.batchConfirmModal.querySelector('h3').textContent = title;
+    dom.batchConfirmMsg.textContent = msg;
+    dom.batchConfirmModal.classList.add('open');
+    dom.btnBatchProceed.onclick = () => { dom.batchConfirmModal.classList.remove('open'); resolve(true); };
+    dom.btnBatchCancel.onclick = () => { dom.batchConfirmModal.classList.remove('open'); resolve(false); };
+  });
+}
+
+// ============================================================
+// SECTION 17: UTILITY FUNCTIONS
+// ============================================================
+function fmtBytes(b) {
+  if (b === 0) return '0 B';
+  if (b < 1024) return b + ' B';
+  if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
+  return (b / (1024 * 1024)).toFixed(2) + ' MB';
+}
+function fmtRate(r) {
+  return r >= 1000 ? (r / 1000).toFixed(r % 1000 === 0 ? 0 : 1) + ' kHz' : r + ' Hz';
+}
+function midiToNote(midi) {
+  const oct = Math.floor(midi / 12) - 1;
+  return NOTE_NAMES[midi % 12] + oct;
+}
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function setStatus(msg, spin = false, type = '') {
+  dom.statusText.textContent = msg;
+  dom.statusText.className = 'status-text' + (type ? ' ' + type : '');
+  setSpinner(spin);
+}
+function setSpinner(on) { dom.globalSpinner.className = 'spinner' + (on ? ' active' : ''); }
+
+// ============================================================
+// SECTION 18: EVENT WIRING
+// ============================================================
+// Drop zone
+dom.sourceDropZone.addEventListener('dragover', e => {
+  e.preventDefault();
+  dom.sourceDropZone.classList.add('drag-over');
+});
+dom.sourceDropZone.addEventListener('dragleave', e => {
+  if (!dom.sourceDropZone.contains(e.relatedTarget))
+    dom.sourceDropZone.classList.remove('drag-over');
+});
+dom.sourceDropZone.addEventListener('drop', async e => {
+  e.preventDefault();
+  dom.sourceDropZone.classList.remove('drag-over');
+  // Only handle external file drops (not internal sample drags)
+  if (e.dataTransfer.files.length > 0) await handleFiles(e.dataTransfer.files);
+});
+dom.sourceDropOverlay.addEventListener('click', () => dom.fileInput.click());
+dom.fileInput.addEventListener('change', e => { if (e.target.files.length) handleFiles(e.target.files); });
+
+// Settings
+dom.targetSampleRate.addEventListener('change', () => {
+  dom.customSampleRate.style.display = dom.targetSampleRate.value === 'custom' ? '' : 'none';
+});
+dom.midiPortSelect.addEventListener('change', updateMIDIOutput);
+dom.turboSpeed.addEventListener('change', () => {
+  const t = parseInt(dom.turboSpeed.value);
+  dom.turboIndicator.textContent = `${t}× ${t > 1 ? 'TURBO' : 'STD'}`;
+  dom.turboIndicator.className = 'turbo-indicator' + (t > 1 ? ' active' : '');
+});
+
+// Buttons
+dom.btnGo.addEventListener('click', async () => {
+  dom.batchBanner.classList.remove('visible');
+  await processItems(state.sourceFiles.filter(f => f.status === 'idle'));
+});
+dom.btnProcessSelected.addEventListener('click', () => {
+  const sel = state.sourceFiles.filter(f => state.selectedSourceIds.has(f.id));
+  const targets = sel.length ? sel : state.sourceFiles.filter(f => f.status === 'idle');
+  if (!targets.length) { setStatus('Nothing to process', false, 'warn'); return; }
+  processItems(targets);
+});
+dom.btnSelectAll.addEventListener('click', () => {
+  state.sourceFiles.forEach(f => state.selectedSourceIds.add(f.id));
+  renderSourceList();
+});
+dom.btnClearSource.addEventListener('click', () => {
+  state.sourceFiles = [];
+  state.selectedSourceIds.clear();
+  renderSourceList();
+  updateMemGauge();
+  dom.batchBanner.classList.remove('visible');
+  setStatus('Source list cleared');
+});
+dom.btnClearQueue.addEventListener('click', () => {
+  state.slots.fill(null);
+  state.selectedSlotIndices.clear();
+  renderSlotGrid();
+  updateMemGauge();
+  setStatus('Transfer queue cleared');
+});
+dom.btnDownloadProcessed.addEventListener('click', () => downloadSelected('wav'));
+dom.btnDownloadHQ.addEventListener('click', () => downloadSelected('hq'));
+dom.btnDownloadSyx.addEventListener('click', () => downloadSelected('syx'));
+dom.btnAddToQueue.addEventListener('click', () => {
+  const sel = state.sourceFiles.filter(f => state.selectedSourceIds.has(f.id) && f.status === 'done');
+  if (!sel.length) { setStatus('Select processed samples to add to queue', false, 'warn'); return; }
+  let slotIdx = 0;
+  for (const item of sel) {
+    while (slotIdx < state.slots.length && state.slots[slotIdx] !== null) slotIdx++;
+    if (slotIdx >= state.slots.length) { setStatus('No free slots available', false, 'warn'); break; }
+    assignToSlot(item.id, slotIdx);
+    slotIdx++;
+  }
+  renderSlotGrid();
+  updateMemGauge();
+});
+dom.btnSendAll.addEventListener('click', () => {
+  const all = state.slots.map((_, i) => i).filter(i => state.slots[i] !== null);
+  sendSDS(all);
+});
+dom.btnSendSelected.addEventListener('click', () => {
+  sendSDS([...state.selectedSlotIndices]);
+});
+dom.btnAbortSend.addEventListener('click', () => { state.abortSend = true; });
+
+// Source list action delegation
+dom.sourceList.addEventListener('click', e => {
+  const btn = e.target.closest('[data-action]');
+  if (!btn) return;
+  const id = parseInt(btn.dataset.id);
+  const action = btn.dataset.action;
+  if (action === 'remove') {
+    if (state.playingItemId === id) stopInlinePlayback();
+    state.sourceFiles = state.sourceFiles.filter(f => f.id !== id);
+    state.selectedSourceIds.delete(id);
+    state.slots = state.slots.map(s => s === id ? null : s);
+    renderSourceList();
+    renderSlotGrid();
+    updateMemGauge();
+  } else if (action === 'play') {
+    const item = state.sourceFiles.find(f => f.id === id);
+    playItemInline(item);
+  } else if (action === 'preview') {
+    const item = state.sourceFiles.find(f => f.id === id);
+    openPlayer(item);
+  }
+});
+
+// Player
+dom.btnPlay.addEventListener('click', () => playAudio(false));
+dom.btnPlayLoop.addEventListener('click', () => playAudio(true));
+dom.btnStop.addEventListener('click', stopAudio);
+dom.btnClosePlayer.addEventListener('click', () => {
+  stopAudio();
+  dom.playerModal.classList.remove('open');
+});
+dom.btnApplyLoop.addEventListener('click', () => {
+  const item = state.playerItem;
+  if (!item) return;
+  item.loopStart = parseInt(dom.loopStart.value);
+  item.loopEnd = parseInt(dom.loopEnd.value);
+  item.hasLoop = dom.loopEnabled.checked;
+  item.overrideLoop = true;
+  // Rebuild WAV + SDS with new loop points
+  if (item.pcm16) {
+    item.processedBuffer = buildWAV(item.pcm16, item.processedSampleRate, item.processedChannels, 16,
+      item.loopStart, item.loopEnd, item.hasLoop, item.rootNote);
+    item.size = item.processedBuffer.byteLength;
+    const slotIdx = state.slots.indexOf(item.id);
+    if (slotIdx >= 0) rebuildSDS(item, slotIdx);
+  }
+  renderSourceItem(item);
+  drawWaveform(item);
+  updateMemGauge();
+  setStatus(`Loop updated: ${item.loopStart}–${item.loopEnd} samples`);
+});
+
+// Nudge buttons
+document.querySelectorAll('.nudge-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const target = btn.dataset.target;
+    const dir = parseInt(btn.dataset.dir);
+    const input = document.getElementById(target);
+    input.value = Math.max(0, parseInt(input.value) + dir);
+    // Redraw waveform with new loop markers
+    if (state.playerItem) {
+      const tempItem = {
+        ...state.playerItem,
+        loopStart: parseInt(dom.loopStart.value),
+        loopEnd: parseInt(dom.loopEnd.value),
+        hasLoop: dom.loopEnabled.checked
+      };
+      drawWaveform(tempItem);
+    }
+  });
+});
+
+dom.loopStart.addEventListener('input', () => {
+  if (state.playerItem) {
+    const t = { ...state.playerItem, loopStart: parseInt(dom.loopStart.value), loopEnd: parseInt(dom.loopEnd.value), hasLoop: dom.loopEnabled.checked };
+    drawWaveform(t);
+  }
+});
+dom.loopEnd.addEventListener('input', () => {
+  if (state.playerItem) {
+    const t = { ...state.playerItem, loopStart: parseInt(dom.loopStart.value), loopEnd: parseInt(dom.loopEnd.value), hasLoop: dom.loopEnabled.checked };
+    drawWaveform(t);
+  }
+});
+dom.loopEnabled.addEventListener('change', () => {
+  if (state.playerItem) {
+    const t = { ...state.playerItem, loopStart: parseInt(dom.loopStart.value), loopEnd: parseInt(dom.loopEnd.value), hasLoop: dom.loopEnabled.checked };
+    drawWaveform(t);
+  }
+});
+
+// Waveform click = set playback position (visual only)
+dom.waveform.addEventListener('click', e => {
+  if (!state.playerItem?.pcm16) return;
+  const rect = dom.waveform.getBoundingClientRect();
+  const frac = (e.clientX - rect.left) / rect.width;
+  const sample = Math.round(frac * state.playerItem.pcm16.length);
+  // Set loop start to clicked position as convenience
+  dom.loopStart.value = sample;
+  const t = { ...state.playerItem, loopStart: sample, loopEnd: parseInt(dom.loopEnd.value), hasLoop: dom.loopEnabled.checked };
+  drawWaveform(t);
+});
+
+// ---- SETTINGS MODAL ----
+document.getElementById('btnOpenSettings').addEventListener('click', () => {
+  populateMIDIPorts();
+  document.getElementById('settingsModal').classList.add('open');
+});
+document.getElementById('btnCloseSettings').addEventListener('click', () => {
+  document.getElementById('settingsModal').classList.remove('open');
+});
+
+// ============================================================
+// SECTION 19: INIT
+// ============================================================
+initSlots();
+initMIDI();
+setStatus('Ready — drop WAV files to begin');
+</script>
+</body>
+</html>
