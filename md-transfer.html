@@ -2071,16 +2071,17 @@ function previewSlot(slotIndex) {
   openPlayer(item);
 }
 
-async function playItemInline(item) {
+function playItemInline(item) {
   if (!item || !item.pcm16) { setStatus('Process sample before playing', false, 'warn'); return; }
   // Toggle: if already playing this item, stop it
   if (state.playingItemId === item.id) {
     stopInlinePlayback();
     return;
   }
-  // Stop anything else that is playing
-  if (state.playingItemId !== null) stopInlinePlayback();
-  // Set state BEFORE rendering so buttons show ■ immediately
+  // Stop anything else — stopAudio() inside playAudio() now handles this too,
+  // but we clear state here so buttons update before playback starts.
+  stopInlinePlayback();
+  // Set state and update buttons to ■
   state.playerItem        = item;
   state.playingItemId     = item.id;
   dom.loopStart.value     = item.loopStart;
@@ -2088,14 +2089,8 @@ async function playItemInline(item) {
   dom.loopEnabled.checked = item.hasLoop;
   renderSlotGrid();
   renderSourceList();
-  // Start playback — playAudio no longer calls stopAudio internally
-  await playAudio(item.hasLoop);
-  // playerSourceNode now exists — attach onended to revert buttons when done
-  if (playerSourceNode) {
-    playerSourceNode.onended = () => {
-      if (state.playingItemId === item.id) stopInlinePlayback();
-    };
-  }
+  // Fully synchronous — no await, no races
+  playAudio(item.hasLoop);
   setStatus(`Playing: ${item.name}`);
 }
 
@@ -2243,71 +2238,96 @@ function drawWaveform(item) {
   ctx.beginPath(); ctx.moveTo(0, H/2); ctx.lineTo(W, H/2); ctx.stroke();
 }
 
-async function playAudio(looping) {
-  // Note: do NOT call stopAudio() here — playItemInline handles stop/state before calling us.
-  const item = state.playerItem;
-  if (!item?.pcm16) return;
+// ── Audio engine ─────────────────────────────────────────────────────────
+// Single AudioContext, single active source node.
+// All state lives here; no async races.
+let _audioCtx  = null;
+let _srcNode   = null;
+let _audioBuf  = null;   // cached buffer for last-loaded item id
+let _bufItemId = null;
 
-  const sr = item.processedSampleRate;
+function _getCtx(sr) {
+  // Reuse context if sample rate matches; otherwise create a new one.
+  // AudioContext at exactly the sample rate of the buffer = zero resampling.
+  if (_audioCtx && _audioCtx.sampleRate === sr && _audioCtx.state !== 'closed') return _audioCtx;
+  if (_audioCtx) { try { _audioCtx.close(); } catch(e) {} }
+  _audioCtx = new AudioContext({ sampleRate: sr });
+  _audioBuf  = null;   // buffer belongs to old ctx, must rebuild
+  _bufItemId = null;
+  return _audioCtx;
+}
+
+function _loadBuffer(item) {
+  // Rebuild Float32 buffer only when the item changes.
+  if (_bufItemId === item.id && _audioBuf) return _audioBuf;
+  const sr  = item.processedSampleRate;
   const pcm = item.pcm16;
-  const numSamples = pcm.length;
-
-  // Create AudioContext at EXACTLY the sample rate of the audio.
-  // This is critical: when AudioContext.sampleRate === AudioBuffer.sampleRate,
-  // the browser plays the buffer 1:1 with no resampling, and AudioBufferSourceNode
-  // loop points are sample-accurate — no click, no drift.
-  if (!playerAudioCtx || playerAudioCtx.sampleRate !== sr) {
-    if (playerAudioCtx) playerAudioCtx.close();
-    playerAudioCtx = new AudioContext({ sampleRate: sr });
-  }
-  if (playerAudioCtx.state === 'suspended') await playerAudioCtx.resume();
-
-  const ls = parseInt(dom.loopStart.value);
-  const le = parseInt(dom.loopEnd.value);
-  const hasLoop = looping && dom.loopEnabled.checked && le > ls;
-
-  // Load PCM directly into an AudioBuffer — no decodeAudioData, no resampling.
-  // Int16 → Float32 conversion is the only operation here.
-  playerAudioBuffer = playerAudioCtx.createBuffer(
-    item.processedChannels || 1, numSamples, sr
-  );
-  const channelData = playerAudioBuffer.getChannelData(0);
-  for (let i = 0; i < numSamples; i++) {
-    channelData[i] = pcm[i] / 32768.0;
-  }
-
-  playerSourceNode = playerAudioCtx.createBufferSource();
-  playerSourceNode.buffer = playerAudioBuffer;
-  playerSourceNode.connect(playerAudioCtx.destination);
-
-  if (hasLoop) {
-    // Use the native AudioBufferSourceNode loop — when AudioContext sampleRate
-    // matches the buffer exactly, this is hardware-accurate: the engine jumps from
-    // loopEnd to loopStart at the exact integer sample boundary, no interpolation gap.
-    playerSourceNode.loop      = true;
-    playerSourceNode.loopStart = ls / sr;  // convert integer sample → seconds
-    playerSourceNode.loopEnd   = le / sr;
-    playerSourceNode.start(0, ls / sr);    // begin playback from loopStart
-  } else {
-    playerSourceNode.loop = false;
-    playerSourceNode.start();
-  }
+  const ctx = _getCtx(sr);
+  const buf = ctx.createBuffer(item.processedChannels || 1, pcm.length, sr);
+  const ch  = buf.getChannelData(0);
+  // Int16 → Float32, direct copy, no resampling
+  for (let i = 0; i < pcm.length; i++) ch[i] = pcm[i] / 32768.0;
+  _audioBuf  = buf;
+  _bufItemId = item.id;
+  return buf;
 }
 
 function stopAudio() {
-  if (playerSourceNode) {
-    try { playerSourceNode.stop(); } catch(e) {}
-    playerSourceNode = null;
+  if (_srcNode) {
+    _srcNode.onended = null;          // prevent stale callback firing
+    try { _srcNode.stop(0); } catch(e) {}
+    _srcNode.disconnect();
+    _srcNode = null;
   }
 }
 
-// Stop inline playback and update buttons
 function stopInlinePlayback() {
   stopAudio();
   state.playingItemId = null;
   renderSlotGrid();
   renderSourceList();
   setStatus('Stopped');
+}
+
+function playAudio(looping) {
+  // Fully synchronous — no async, no races.
+  const item = state.playerItem;
+  if (!item?.pcm16) return;
+
+  // Kill any currently running node first
+  stopAudio();
+
+  const sr  = item.processedSampleRate;
+  const ctx = _getCtx(sr);
+  if (ctx.state === 'suspended') ctx.resume();   // fire-and-forget resume
+
+  const buf = _loadBuffer(item);
+
+  const ls     = parseInt(dom.loopStart.value)  || 0;
+  const le     = parseInt(dom.loopEnd.value)    || buf.length - 1;
+  const doLoop = looping && dom.loopEnabled.checked && le > ls;
+
+  _srcNode = ctx.createBufferSource();
+  _srcNode.buffer = buf;
+  _srcNode.connect(ctx.destination);
+
+  if (doLoop) {
+    // loopEnd in the API is EXCLUSIVE — the engine jumps back BEFORE reaching it.
+    // Adding one sample guarantees sample le is actually heard before the wrap.
+    _srcNode.loop      = true;
+    _srcNode.loopStart = ls / sr;
+    _srcNode.loopEnd   = (le + 1) / sr;
+    _srcNode.start(0, ls / sr);
+  } else {
+    _srcNode.loop = false;
+    _srcNode.start();
+    _srcNode.onended = () => {
+      if (state.playingItemId === item.id) stopInlinePlayback();
+    };
+  }
+
+  // Keep the module-level alias in sync so legacy callers still work
+  playerSourceNode = _srcNode;
 }
 
 // ============================================================
