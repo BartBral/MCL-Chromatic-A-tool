@@ -2243,8 +2243,9 @@ function drawWaveform(item) {
 // All state lives here; no async races.
 let _audioCtx  = null;
 let _srcNode   = null;
-let _audioBuf  = null;   // cached buffer for last-loaded item id
-let _bufItemId = null;
+let _audioBuf      = null;
+let _bufItemId     = null;
+let _bufResampRatio = 1.0;  // itemSr / ctxSr — for rescaling loop points
 
 function _getCtx(sr) {
   // Reuse context if sample rate matches; otherwise create a new one.
@@ -2260,15 +2261,40 @@ function _getCtx(sr) {
 function _loadBuffer(item) {
   // Rebuild Float32 buffer only when the item changes.
   if (_bufItemId === item.id && _audioBuf) return _audioBuf;
-  const sr  = item.processedSampleRate;
-  const pcm = item.pcm16;
-  const ctx = _getCtx(sr);
-  const buf = ctx.createBuffer(item.processedChannels || 1, pcm.length, sr);
-  const ch  = buf.getChannelData(0);
-  // Int16 → Float32, direct copy, no resampling
-  for (let i = 0; i < pcm.length; i++) ch[i] = pcm[i] / 32768.0;
-  _audioBuf  = buf;
-  _bufItemId = item.id;
+  const itemSr = item.processedSampleRate;
+  const ctxSr  = _audioCtx.sampleRate;   // what the browser ACTUALLY runs at
+  const pcm    = item.pcm16;
+
+  let floatData;
+  if (itemSr === ctxSr) {
+    // Rates match exactly — straight copy, zero resampling, loop points untouched
+    floatData = new Float32Array(pcm.length);
+    for (let i = 0; i < pcm.length; i++) floatData[i] = pcm[i] / 32768.0;
+  } else {
+    // Browser is running at a different rate (e.g. 48 kHz output, 44.1 kHz sample).
+    // Resample NOW in JS using linear interpolation so the AudioBuffer lives
+    // entirely at ctxSr — the browser will play it with zero internal resampling
+    // and loop points will be exactly on integer sample boundaries.
+    const ratio   = itemSr / ctxSr;                         // e.g. 44100/48000
+    const outLen  = Math.round(pcm.length / ratio);
+    floatData = new Float32Array(outLen);
+    for (let i = 0; i < outLen; i++) {
+      const pos  = i * ratio;
+      const idx  = Math.floor(pos);
+      const frac = pos - idx;
+      const a    = idx     < pcm.length ? pcm[idx]     / 32768.0 : 0;
+      const b    = idx + 1 < pcm.length ? pcm[idx + 1] / 32768.0 : 0;
+      floatData[i] = a + frac * (b - a);
+    }
+  }
+
+  const buf = _audioCtx.createBuffer(item.processedChannels || 1, floatData.length, ctxSr);
+  buf.getChannelData(0).set(floatData);
+
+  // Store the ratio so callers can rescale loop points into ctxSr coordinates
+  _audioBuf      = buf;
+  _bufItemId     = item.id;
+  _bufResampRatio = itemSr / ctxSr;   // multiply sample-index by this → ctxSr index
   return buf;
 }
 
@@ -2312,12 +2338,16 @@ function playAudio(looping) {
   _srcNode.connect(ctx.destination);
 
   if (doLoop) {
-    // loopEnd in the API is EXCLUSIVE — the engine jumps back BEFORE reaching it.
-    // Adding one sample guarantees sample le is actually heard before the wrap.
+    // Loop points must be in CONTEXT sample rate coordinates, not item sample rate.
+    // _bufResampRatio = itemSr / ctxSr:  ctxSample = itemSample / _bufResampRatio
+    // loopEnd is EXCLUSIVE in the API, so we add 1 item-sample before converting.
+    const ctxSr    = ctx.sampleRate;
+    const lsCtx    = (ls       / _bufResampRatio) / ctxSr;
+    const leCtx    = ((le + 1) / _bufResampRatio) / ctxSr;
     _srcNode.loop      = true;
-    _srcNode.loopStart = ls / sr;
-    _srcNode.loopEnd   = (le + 1) / sr;
-    _srcNode.start(0, ls / sr);
+    _srcNode.loopStart = lsCtx;
+    _srcNode.loopEnd   = leCtx;
+    _srcNode.start(0, lsCtx);
   } else {
     _srcNode.loop = false;
     _srcNode.start();
