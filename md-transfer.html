@@ -477,7 +477,7 @@ input[type=number] { width: 70px; }
 }
 .slot-item:last-child { border-bottom: none; }
 .slot-item:hover { background: var(--bg2); }
-.slot-item.drop-target { background: #e8a02010; outline: 1px solid var(--amber); }
+.slot-item.drop-target { background: #e8a02018; outline: 2px dashed var(--amber); outline-offset: -2px; }
 .slot-item.occupied { }
 .slot-item.selected-slot { background: #30c06018; outline: 2px solid var(--green); outline-offset: -2px; }
 .slot-item.sending { background: #3080e010; }
@@ -832,7 +832,7 @@ input[type=checkbox] {
     <span class="sub">SPS-1UW Sample Manager</span>
   </div>
 
-  <button class="btn btn-ghost" id="btnOpenSettings" style="font-size:0.78rem;padding:5px 16px;letter-spacing:0.12em">⚙ SETTINGS</button>
+  <button class="btn btn-ghost" id="btnOpenSettings" style="font-size:0.78rem;padding:5px 16px;letter-spacing:0.12em;border-color:var(--amber);color:var(--amber)">⚙ SETTINGS</button>
 
 </header>
 
@@ -2029,13 +2029,34 @@ function renderSlotGrid() {
       }
       toggleSelectSlot(i);
     });
+    // Drag FROM an occupied slot (for slot-to-slot swapping)
+    el.draggable = !!sid;
+    if (sid) {
+      el.addEventListener('dragstart', e => {
+        // Mark this as a slot drag so the drop handler knows to swap
+        e.dataTransfer.setData('text/plain', String(sid));
+        e.dataTransfer.setData('slot-source', String(i));
+        el.classList.add('dragging');
+      });
+      el.addEventListener('dragend', () => el.classList.remove('dragging'));
+    }
     el.addEventListener('dragover',  e => { e.preventDefault(); el.classList.add('drop-target'); });
-    el.addEventListener('dragleave', ()  => el.classList.remove('drop-target'));
+    el.addEventListener('dragleave', e => {
+      // Only remove if we're actually leaving this element (not entering a child)
+      if (!el.contains(e.relatedTarget)) el.classList.remove('drop-target');
+    });
     el.addEventListener('drop', e => {
       e.preventDefault();
       el.classList.remove('drop-target');
-      const id = parseInt(e.dataTransfer.getData('text/plain'));
-      assignToSlot(id, i);
+      const sourceSlot = parseInt(e.dataTransfer.getData('slot-source'));
+      const sampleId   = parseInt(e.dataTransfer.getData('text/plain'));
+      if (!isNaN(sourceSlot)) {
+        // Slot-to-slot swap
+        swapSlots(sourceSlot, i);
+      } else {
+        // From source list into slot
+        assignToSlot(sampleId, i);
+      }
     });
 
     dom.slotGrid.appendChild(el);
@@ -2104,6 +2125,19 @@ function assignToSlot(sampleId, slotIndex) {
   renderSlotGrid();
   updateMemGauge();
   setStatus(`Assigned "${item.name}" → slot ${slotIndex}`);
+}
+
+function swapSlots(fromIdx, toIdx) {
+  if (fromIdx === toIdx) return;
+  const tmp = state.slots[toIdx];
+  state.slots[toIdx]   = state.slots[fromIdx];
+  state.slots[fromIdx] = tmp;
+  // Rebuild SDS for both slots with their new slot numbers
+  if (state.slots[toIdx])   { const item = state.sourceFiles.find(f => f.id === state.slots[toIdx]);   if (item) rebuildSDS(item, toIdx); }
+  if (state.slots[fromIdx]) { const item = state.sourceFiles.find(f => f.id === state.slots[fromIdx]); if (item) rebuildSDS(item, fromIdx); }
+  renderSlotGrid();
+  updateMemGauge();
+  setStatus(`Swapped slot ${fromIdx + 1} ↔ slot ${toIdx + 1}`);
 }
 
 function rebuildSDS(item, slot) {
