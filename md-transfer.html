@@ -2250,7 +2250,12 @@ async function playAudio(looping) {
 
   const sr = item.processedSampleRate;
   const pcm = item.pcm16;
+  const numSamples = pcm.length;
 
+  // Create AudioContext at EXACTLY the sample rate of the audio.
+  // This is critical: when AudioContext.sampleRate === AudioBuffer.sampleRate,
+  // the browser plays the buffer 1:1 with no resampling, and AudioBufferSourceNode
+  // loop points are sample-accurate — no click, no drift.
   if (!playerAudioCtx || playerAudioCtx.sampleRate !== sr) {
     if (playerAudioCtx) playerAudioCtx.close();
     playerAudioCtx = new AudioContext({ sampleRate: sr });
@@ -2261,46 +2266,32 @@ async function playAudio(looping) {
   const le = parseInt(dom.loopEnd.value);
   const hasLoop = looping && dom.loopEnabled.checked && le > ls;
 
-  let playData;
-  if (hasLoop) {
-    // Pre-render the loop manually into a flat buffer: play up to loopEnd,
-    // then repeat the loop region [ls..le] for ~8 seconds total.
-    // This completely avoids the Web Audio API's floating-point loop boundary,
-    // which cannot land on an exact integer sample and causes a click every cycle.
-    const loopLen   = le - ls;                       // samples in one loop cycle
-    const preLen    = le;                             // samples before first loop point
-    const targetLen = sr * 8;                         // 8 seconds total playback
-    const loopsNeeded = Math.ceil((targetLen - preLen) / loopLen);
-    const totalLen  = preLen + loopsNeeded * loopLen;
-
-    playData = new Float32Array(totalLen);
-    // Pre-loop section (sample 0 → loopEnd)
-    for (let i = 0; i < preLen; i++) {
-      playData[i] = pcm[i] / 32768.0;
-    }
-    // Loop cycles — copy exact integer sample ranges, no interpolation
-    for (let rep = 0; rep < loopsNeeded; rep++) {
-      const outBase = preLen + rep * loopLen;
-      for (let i = 0; i < loopLen; i++) {
-        playData[outBase + i] = pcm[ls + i] / 32768.0;
-      }
-    }
-  } else {
-    // No loop — just play the whole sample straight through
-    playData = new Float32Array(pcm.length);
-    for (let i = 0; i < pcm.length; i++) {
-      playData[i] = pcm[i] / 32768.0;
-    }
+  // Load PCM directly into an AudioBuffer — no decodeAudioData, no resampling.
+  // Int16 → Float32 conversion is the only operation here.
+  playerAudioBuffer = playerAudioCtx.createBuffer(
+    item.processedChannels || 1, numSamples, sr
+  );
+  const channelData = playerAudioBuffer.getChannelData(0);
+  for (let i = 0; i < numSamples; i++) {
+    channelData[i] = pcm[i] / 32768.0;
   }
-
-  playerAudioBuffer = playerAudioCtx.createBuffer(1, playData.length, sr);
-  playerAudioBuffer.getChannelData(0).set(playData);
 
   playerSourceNode = playerAudioCtx.createBufferSource();
   playerSourceNode.buffer = playerAudioBuffer;
   playerSourceNode.connect(playerAudioCtx.destination);
-  playerSourceNode.loop = false; // no API loop — we pre-rendered it
-  playerSourceNode.start();
+
+  if (hasLoop) {
+    // Use the native AudioBufferSourceNode loop — when AudioContext sampleRate
+    // matches the buffer exactly, this is hardware-accurate: the engine jumps from
+    // loopEnd to loopStart at the exact integer sample boundary, no interpolation gap.
+    playerSourceNode.loop      = true;
+    playerSourceNode.loopStart = ls / sr;  // convert integer sample → seconds
+    playerSourceNode.loopEnd   = le / sr;
+    playerSourceNode.start(0, ls / sr);    // begin playback from loopStart
+  } else {
+    playerSourceNode.loop = false;
+    playerSourceNode.start();
+  }
 }
 
 function stopAudio() {
