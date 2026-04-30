@@ -2331,6 +2331,7 @@ function playAudio(looping) {
 
   const ls     = parseInt(dom.loopStart.value)  || 0;
   const le     = parseInt(dom.loopEnd.value)    || buf.length - 1;
+  console.log('[MD-Audio] itemSr='+item.processedSampleRate+' ctxSr='+ctx.sampleRate+' bufLen='+buf.length+' ls='+ls+' le='+le+' ratio='+_bufResampRatio.toFixed(6));
   const doLoop = looping && dom.loopEnabled.checked && le > ls;
 
   _srcNode = ctx.createBufferSource();
