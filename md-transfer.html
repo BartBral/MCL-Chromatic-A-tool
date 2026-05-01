@@ -1813,15 +1813,26 @@ async function processItem(item, settings) {
         resampledData, scaled.start, srcStartVal, srcStartSlope, snapWindow
       );
 
-      // Step 2: find loopEnd in output whose value+slope matches loopStart —
-      //   so the jump loopEnd→loopStart is seamless in both value and direction.
-      const lsVal   = resampledData[loopStart];
-      const lsSlope = loopStart > 0
-        ? Math.sign(resampledData[loopStart] - resampledData[loopStart - 1])
+      // Step 2: find loopEnd in output whose value+slope makes the jump
+      //   loopEnd → loopStart seamless.
+      //
+      //   The playback sequence at the boundary is:
+      //     ... data[loopEnd-1], data[loopEnd], data[loopStart], data[loopStart+1] ...
+      //
+      //   We need TWO things to be continuous across the jump:
+      //     1. VALUE:  data[loopEnd] ≈ data[loopStart]  (no amplitude step)
+      //     2. SLOPE:  the direction arriving at loopEnd must match the direction
+      //                leaving loopStart, i.e.:
+      //                sign(data[loopEnd] - data[loopEnd-1])
+      //                  === sign(data[loopStart+1] - data[loopStart])
+      //                Because after the jump, data[loopStart+1] is the next sample.
+      const lsVal        = resampledData[loopStart];
+      const lsOutSlope   = (loopStart + 1 < resampledData.length)
+        ? Math.sign(resampledData[loopStart + 1] - resampledData[loopStart])
         : 0;
 
       loopEnd = findBestLoopEnd(
-        resampledData, scaled.end, lsVal, lsSlope, snapWindow
+        resampledData, scaled.end, lsVal, lsOutSlope, snapWindow
       );
       // loopEnd must be after loopStart and before end of buffer
       loopEnd = Math.max(loopStart + 1, Math.min(resampledData.length - 1, loopEnd));
