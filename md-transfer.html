@@ -1540,18 +1540,26 @@ function applyLoopCrossfade(data, loopStart, loopEnd, xfLen) {
   //   gainTail = cos(t·π/2)  goes 1→0 as t goes 0→1
   //   gainHead = sin(t·π/2)  goes 0→1 as t goes 0→1
 
+  // Use pre-roll material (the XF samples immediately BEFORE loopStart).
+  // This audio is never played in the loop itself, so mixing it into the tail
+  // causes zero phase cancellation with the loop content.
+  // At loopEnd, the tail has fully transitioned to sound like the audio just
+  // before loopStart — so the jump back to loopStart is seamless.
   for (let i = 0; i < maxXf; i++) {
-    const t       = (i + 1) / maxXf;                   // (1/maxXf)→1, reaches 1.0 at loopEnd
-    const gainTail = Math.cos(t * Math.PI * 0.5);      // 1→0
-    const gainHead = Math.sin(t * Math.PI * 0.5);      // 0→1
+    const t        = (i + 1) / maxXf;
+    const gainTail = Math.cos(t * Math.PI * 0.5);  // 1→0
+    const gainPre  = Math.sin(t * Math.PI * 0.5);  // 0→1
 
-    const tailIdx = loopEnd - maxXf + 1 + i;           // loopEnd-maxXf+1 → loopEnd
-    const headIdx = loopStart + (maxXf - 1 - i);       // loopStart+maxXf-1 → loopStart
+    // tail: last maxXf samples of the loop
+    const tailIdx = loopEnd - maxXf + 1 + i;
+    // pre-roll: maxXf samples before loopStart (never played during loop)
+    // aligned so preIdx = loopStart-1 when i = maxXf-1 (at loopEnd)
+    const preIdx  = loopStart - maxXf + i;
 
     if (tailIdx < 0 || tailIdx >= data.length) continue;
-    if (headIdx < 0 || headIdx >= data.length) continue;
+    if (preIdx  < 0 || preIdx  >= data.length) continue;
 
-    data[tailIdx] = data[tailIdx] * gainTail + data[headIdx] * gainHead;
+    data[tailIdx] = data[tailIdx] * gainTail + data[preIdx] * gainPre;
   }
 }
 
