@@ -1834,8 +1834,19 @@ async function processItem(item, settings) {
       loopEnd = findBestLoopEnd(
         resampledData, scaled.end, lsVal, lsOutSlope, snapWindow
       );
+      // The found index is where data[i] ≈ data[loopStart].
+      // But loopEnd is the LAST sample played before the jump back.
+      // The jump is: data[loopEnd] → data[loopStart].
+      // We found where data[i] ≈ data[loopStart], so data[i] itself would
+      // create a near-zero jump to data[loopStart] — but the preceding sample
+      // data[i-1] transitions INTO data[i] which then jumps to data[loopStart].
+      // Subtract 1: data[loopEnd-1] is now the last sample played, and
+      // data[loopEnd] (the found match) is effectively skipped — the jump
+      // data[loopEnd-1] → data[loopStart] uses the sample BEFORE the match,
+      // which is approaching the target value from the correct direction.
+      loopEnd = loopEnd - 1;
       // loopEnd must be after loopStart and before end of buffer
-      loopEnd = Math.max(loopStart + 1, Math.min(resampledData.length - 1, loopEnd));
+      loopEnd = Math.max(loopStart + 1, Math.min(resampledData.length - 2, loopEnd));
     } else {
       loopStart = scaled.start;
       loopEnd   = scaled.end;
