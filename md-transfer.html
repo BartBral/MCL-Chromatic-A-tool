@@ -1521,25 +1521,37 @@ function findBestLoopEnd(data, scaledPos, matchVal, matchSlope, window) {
 //   loopStart itself is unchanged — the loop jumps back there cleanly.
 function applyLoopCrossfade(data, loopStart, loopEnd, xfLen) {
   if (xfLen <= 0) return;
-  // Clamp xfLen to available space
+  // Clamp xfLen so it fits within the loop and the pre-loop material
   const maxXf = Math.min(xfLen, loopStart, loopEnd - loopStart);
   if (maxXf <= 0) return;
 
-  for (let i = 0; i < maxXf; i++) {
-    // Equal-power crossfade using sin/cos
-    const t    = i / maxXf;                        // 0→1
-    const gainA = Math.cos(t * Math.PI * 0.5);    // fade out: 1→0
-    const gainB = Math.sin(t * Math.PI * 0.5);    // fade in:  0→1
+  // The crossfade region is the last maxXf samples of the loop:
+  //   tailIdx runs from (loopEnd - maxXf + 1) up to loopEnd
+  //
+  // Each tail sample is blended with a head sample, but headIdx runs BACKWARDS:
+  //   headIdx = loopStart + (maxXf - 1 - i)
+  //
+  // This ensures that at i = maxXf-1 (= loopEnd), headIdx = loopStart.
+  // So data[loopEnd] ends up ≈ data[loopStart] → the jump is seamless.
+  //
+  // t uses (i+1)/maxXf so the last sample reaches exactly gainHead=1.0.
+  //
+  // Equal-power:
+  //   gainTail = cos(t·π/2)  goes 1→0 as t goes 0→1
+  //   gainHead = sin(t·π/2)  goes 0→1 as t goes 0→1
 
-    // Position in the tail being modified
-    const tailIdx  = loopEnd + 1 - maxXf + i;
-    // Corresponding position at the start of the loop (source for blend-in)
-    const headIdx  = loopStart + i;
+  for (let i = 0; i < maxXf; i++) {
+    const t       = (i + 1) / maxXf;                   // (1/maxXf)→1, reaches 1.0 at loopEnd
+    const gainTail = Math.cos(t * Math.PI * 0.5);      // 1→0
+    const gainHead = Math.sin(t * Math.PI * 0.5);      // 0→1
+
+    const tailIdx = loopEnd - maxXf + 1 + i;           // loopEnd-maxXf+1 → loopEnd
+    const headIdx = loopStart + (maxXf - 1 - i);       // loopStart+maxXf-1 → loopStart
 
     if (tailIdx < 0 || tailIdx >= data.length) continue;
     if (headIdx < 0 || headIdx >= data.length) continue;
 
-    data[tailIdx] = data[tailIdx] * gainA + data[headIdx] * gainB;
+    data[tailIdx] = data[tailIdx] * gainTail + data[headIdx] * gainHead;
   }
 }
 
@@ -1917,21 +1929,31 @@ async function processItem(item, settings) {
   item.loopEnd = loopEnd;
   item.hasLoop = hasLoop;
 
-  // Step 5: Loop crossfade and/or crop (modifies resampledData in place / replaces it)
+  // Step 5: Loop crossfade and/or crop
+  // Apply to BOTH the MD-ready buffer and the HQ buffer so they are consistent.
+  function applyPostProcess(data, ls, le, doXfade, xfLen, doCrop) {
+    let d = doXfade && le > ls ? new Float32Array(data) : data;
+    if (doXfade && le > ls) applyLoopCrossfade(d, ls, le, xfLen);
+    if (doCrop  && le > ls) d = cropAfterLoop(d, le);
+    return d;
+  }
+
   let processedData = resampledData;
+  let processedHqData = hqData;
+
   if (hasLoop) {
-    // Crossfade: blend loop tail with loop head for seamless looping
-    if (settings.loopXfade > 0) {
-      // Work on a copy so resampledData stays clean for HQ buffer
-      processedData = new Float32Array(resampledData);
-      applyLoopCrossfade(processedData, loopStart, loopEnd, settings.loopXfade);
-    }
-    // Crop: discard everything after loopEnd — saves MDUW memory
-    if (settings.cropAfterLoop) {
-      processedData = cropAfterLoop(processedData, loopEnd);
-      // Loop end becomes the last sample of the (now shorter) buffer
-      // Loop start is unchanged; loop end stays as-is (it IS the last sample)
-    }
+    const doXfade = settings.loopXfade > 0;
+    const doCrop  = settings.cropAfterLoop;
+    // MD-ready (at dstRate)
+    processedData = applyPostProcess(
+      resampledData, loopStart, loopEnd, doXfade, settings.loopXfade, doCrop
+    );
+    // HQ (at dstRate*2) — loop points are at 2× coordinates
+    processedHqData = applyPostProcess(
+      hqData,
+      Math.round(loopStart * 2), Math.round(loopEnd * 2),
+      doXfade, settings.loopXfade * 2, doCrop
+    );
   }
 
   // Step 6: Dither to 16-bit
@@ -1943,7 +1965,7 @@ async function processItem(item, settings) {
   item.processedBuffer = buildWAV(pcm16, dstRate, outChannels, 16, loopStart, loopEnd, hasLoop, targetMidi);
   // HQ: 32-bit float WAV at 2× target rate — maximum quality for external use.
   // hqData is already a Float32Array from resampleWindowed. Pass directly.
-  item.hqBuffer = buildWAV(hqData, dstRate * 2, outChannels, 32,
+  item.hqBuffer = buildWAV(processedHqData, dstRate * 2, outChannels, 32,
     Math.round(loopStart * 2),
     Math.round(loopEnd * 2),
     hasLoop, targetMidi);
