@@ -1457,6 +1457,27 @@ function rescaleLoopPoints(loopStart, loopEnd, srcLen, dstLen) {
   };
 }
 
+// --- Snap a sample index to the nearest zero crossing in floatData ---
+// Searches outward from 'pos' within ±window samples.
+// A zero crossing is where consecutive samples have opposite signs.
+// Returns the index of the sample just AFTER the crossing (value closest to 0).
+function snapToZeroCrossing(floatData, pos, window) {
+  const len = floatData.length;
+  pos = Math.max(1, Math.min(len - 2, pos));
+  // Search outward: check pos itself first, then pos±1, pos±2, ...
+  for (let delta = 0; delta <= window; delta++) {
+    for (const dir of (delta === 0 ? [0] : [-1, 1])) {
+      const i = pos + delta * (dir === 0 ? 0 : dir);
+      if (i < 1 || i >= len - 1) continue;
+      if (floatData[i - 1] * floatData[i] <= 0) {
+        // Zero crossing between i-1 and i — pick the sample closer to zero
+        return Math.abs(floatData[i]) <= Math.abs(floatData[i - 1]) ? i : i - 1;
+      }
+    }
+  }
+  return pos; // no zero crossing found in window, return original
+}
+
 // --- Dither & convert to 16-bit PCM ---
 function floatTo16BitPCM(floatData) {
   const out = new Int16Array(floatData.length);
@@ -1761,8 +1782,12 @@ async function processItem(item, settings) {
     const srcLoopStart = Math.max(0, Math.min(wav.numSamples - 1, wav.loopStart));
     const srcLoopEnd   = Math.max(0, Math.min(wav.numSamples - 1, wav.loopEnd));
     const scaled = rescaleLoopPoints(srcLoopStart, srcLoopEnd, wav.numSamples, resampledData.length);
-    loopStart = scaled.start;
-    loopEnd = scaled.end;
+    // Snap to nearest zero crossing in the resampled output.
+    // The sinc interpolation shifts the phase of zero crossings by a few samples —
+    // snapping guarantees a click-free loop boundary in the output waveform.
+    const snapWindow = Math.max(16, Math.round(resampledData.length / wav.numSamples) * 4);
+    loopStart = snapToZeroCrossing(resampledData, scaled.start, snapWindow);
+    loopEnd   = snapToZeroCrossing(resampledData, scaled.end,   snapWindow);
     hasLoop = true;
   }
   if (item.overrideLoop) {
@@ -2316,39 +2341,37 @@ function stopInlinePlayback() {
 }
 
 function playAudio(looping) {
-  // Fully synchronous — no async, no races.
   const item = state.playerItem;
   if (!item?.pcm16) return;
 
-  // Kill any currently running node first
   stopAudio();
 
   const sr  = item.processedSampleRate;
   const ctx = _getCtx(sr);
-  if (ctx.state === 'suspended') ctx.resume();   // fire-and-forget resume
+  if (ctx.state === 'suspended') ctx.resume();
 
-  const buf = _loadBuffer(item);
-
-  const ls     = parseInt(dom.loopStart.value)  || 0;
-  const le     = parseInt(dom.loopEnd.value)    || buf.length - 1;
-  console.log('[MD-Audio] itemSr='+item.processedSampleRate+' ctxSr='+ctx.sampleRate+' bufLen='+buf.length+' ls='+ls+' le='+le+' ratio='+_bufResampRatio.toFixed(6));
+  const pcm    = item.pcm16;
+  const ls     = parseInt(dom.loopStart.value) || 0;
+  const le     = parseInt(dom.loopEnd.value)   || pcm.length - 1;
   const doLoop = looping && dom.loopEnabled.checked && le > ls;
+
+  // Load full sample into buffer — straight Int16→Float32, no tricks
+  const buf = _loadBuffer(item);
 
   _srcNode = ctx.createBufferSource();
   _srcNode.buffer = buf;
   _srcNode.connect(ctx.destination);
 
   if (doLoop) {
-    // Loop points must be in CONTEXT sample rate coordinates, not item sample rate.
-    // _bufResampRatio = itemSr / ctxSr:  ctxSample = itemSample / _bufResampRatio
-    // loopEnd is EXCLUSIVE in the API, so we add 1 item-sample before converting.
-    const ctxSr    = ctx.sampleRate;
-    const lsCtx    = (ls       / _bufResampRatio) / ctxSr;
-    const leCtx    = ((le + 1) / _bufResampRatio) / ctxSr;
+    // Native AudioBufferSourceNode loop.
+    // loopEnd is EXCLUSIVE in the spec — the engine wraps back to loopStart
+    // BEFORE playing the sample at loopEnd. So the played range is [ls .. le-1]
+    // then back to ls. To include sample le in the loop, set loopEnd = le + 1.
+    // Both points in seconds: divide by sample rate.
     _srcNode.loop      = true;
-    _srcNode.loopStart = lsCtx;
-    _srcNode.loopEnd   = leCtx;
-    _srcNode.start(0, lsCtx);
+    _srcNode.loopStart = ls / sr;
+    _srcNode.loopEnd   = (le + 1) / sr;
+    _srcNode.start(0, ls / sr);
   } else {
     _srcNode.loop = false;
     _srcNode.start();
@@ -2357,9 +2380,9 @@ function playAudio(looping) {
     };
   }
 
-  // Keep the module-level alias in sync so legacy callers still work
   playerSourceNode = _srcNode;
 }
+
 
 // ============================================================
 // SECTION 14: MIDI / SDS TRANSFER
