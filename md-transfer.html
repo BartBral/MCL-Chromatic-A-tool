@@ -903,6 +903,17 @@ input[type=checkbox] {
         <input type="number" id="loopSnapWindow" value="32" min="0" max="512" style="width:60px" title="Search window in samples for loop point snap. 0 = disabled.">
         <span class="lbl" style="color:var(--text-dim);font-size:0.65rem">smp</span>
       </div>
+      <div class="sep"></div>
+      <div class="setting-group">
+        <span class="lbl">XFade</span>
+        <input type="number" id="loopXfade" value="0" min="0" max="4096" style="width:60px" title="Loop crossfade length in samples. 0 = disabled.">
+        <span class="lbl" style="color:var(--text-dim);font-size:0.65rem">smp</span>
+      </div>
+      <div class="sep"></div>
+      <div class="setting-group">
+        <span class="lbl" style="white-space:nowrap">Crop Loop</span>
+        <input type="checkbox" id="cropAfterLoop" title="Discard audio after loop end — saves MDUW memory">
+      </div>
     </div>
 
     <!-- batch confirm banner -->
@@ -1194,6 +1205,8 @@ const dom = {
   monoMode: $('monoMode'),
   sincTaps: $('sincTaps'),
   loopSnapWindow: $('loopSnapWindow'),
+  loopXfade: $('loopXfade'),
+  cropAfterLoop: $('cropAfterLoop'),
   midiPortSelect: $('midiPortSelect'),
   turboSpeed: $('turboSpeed'),
   sdsHandshake: $('sdsHandshake'),
@@ -1492,6 +1505,48 @@ function findBestLoopStart(data, scaledPos, targetVal, targetSlope, window) {
 function findBestLoopEnd(data, scaledPos, matchVal, matchSlope, window) {
   // Identical algorithm — just matching a different target
   return findBestLoopStart(data, scaledPos, matchVal, matchSlope, window);
+}
+
+// --- Loop crossfade ---
+// Blends the tail of the loop into the head using equal-power crossfade.
+// XF samples from just after loopStart are blended with XF samples just before loopEnd+1.
+// The crossfade is written IN PLACE into the data array.
+// After this, the loop plays seamlessly at loopEnd→loopStart with no discontinuity.
+//
+// Topology (standard forward-loop crossfade):
+//   The region [loopEnd+1-xf .. loopEnd] in the output gets a mix of:
+//     - itself (fade out: 1→0)
+//     - samples [loopStart .. loopStart+xf-1] (fade in: 0→1)
+//   So the tail of the loop absorbs the beginning of the loop, blended.
+//   loopStart itself is unchanged — the loop jumps back there cleanly.
+function applyLoopCrossfade(data, loopStart, loopEnd, xfLen) {
+  if (xfLen <= 0) return;
+  // Clamp xfLen to available space
+  const maxXf = Math.min(xfLen, loopStart, loopEnd - loopStart);
+  if (maxXf <= 0) return;
+
+  for (let i = 0; i < maxXf; i++) {
+    // Equal-power crossfade using sin/cos
+    const t    = i / maxXf;                        // 0→1
+    const gainA = Math.cos(t * Math.PI * 0.5);    // fade out: 1→0
+    const gainB = Math.sin(t * Math.PI * 0.5);    // fade in:  0→1
+
+    // Position in the tail being modified
+    const tailIdx  = loopEnd + 1 - maxXf + i;
+    // Corresponding position at the start of the loop (source for blend-in)
+    const headIdx  = loopStart + i;
+
+    if (tailIdx < 0 || tailIdx >= data.length) continue;
+    if (headIdx < 0 || headIdx >= data.length) continue;
+
+    data[tailIdx] = data[tailIdx] * gainA + data[headIdx] * gainB;
+  }
+}
+
+// --- Crop audio after loop end ---
+// Returns a new Float32Array containing only samples 0..loopEnd (inclusive).
+function cropAfterLoop(data, loopEnd) {
+  return data.slice(0, loopEnd + 1);
 }
 
 // --- Dither & convert to 16-bit PCM ---
@@ -1862,8 +1917,25 @@ async function processItem(item, settings) {
   item.loopEnd = loopEnd;
   item.hasLoop = hasLoop;
 
-  // Step 5: Dither to 16-bit
-  const pcm16 = floatTo16BitPCM(resampledData);
+  // Step 5: Loop crossfade and/or crop (modifies resampledData in place / replaces it)
+  let processedData = resampledData;
+  if (hasLoop) {
+    // Crossfade: blend loop tail with loop head for seamless looping
+    if (settings.loopXfade > 0) {
+      // Work on a copy so resampledData stays clean for HQ buffer
+      processedData = new Float32Array(resampledData);
+      applyLoopCrossfade(processedData, loopStart, loopEnd, settings.loopXfade);
+    }
+    // Crop: discard everything after loopEnd — saves MDUW memory
+    if (settings.cropAfterLoop) {
+      processedData = cropAfterLoop(processedData, loopEnd);
+      // Loop end becomes the last sample of the (now shorter) buffer
+      // Loop start is unchanged; loop end stays as-is (it IS the last sample)
+    }
+  }
+
+  // Step 6: Dither to 16-bit
+  const pcm16 = floatTo16BitPCM(processedData);
 
   // Build output buffers
   // Use targetMidi (the A-key we pitched TO) as the unity note in smpl/inst chunks —
@@ -1917,6 +1989,8 @@ function getSettings() {
     monoMode: dom.monoMode.value,
     sincTaps: dom.sincTaps.value,
     loopSnapWindow: parseInt(dom.loopSnapWindow.value) || 0,
+    loopXfade: parseInt(dom.loopXfade.value) || 0,
+    cropAfterLoop: dom.cropAfterLoop.checked,
   };
 }
 
