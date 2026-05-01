@@ -908,6 +908,14 @@ input[type=checkbox] {
         <span class="lbl">XFade</span>
         <input type="number" id="loopXfade" value="0" min="0" max="4096" style="width:60px" title="Loop crossfade length in samples. 0 = disabled.">
         <span class="lbl" style="color:var(--text-dim);font-size:0.65rem">smp</span>
+        <select id="xfadeCurve" title="Crossfade curve shape">
+          <option value="linear" selected>Linear</option>
+          <option value="logarithmic">Logarithmic</option>
+          <option value="equal_power">Equal Power</option>
+          <option value="sine">Sine (S-curve)</option>
+          <option value="exponential">Exponential</option>
+          <option value="square_root">Square Root</option>
+        </select>
       </div>
       <div class="sep"></div>
       <div class="setting-group">
@@ -1206,6 +1214,7 @@ const dom = {
   sincTaps: $('sincTaps'),
   loopSnapWindow: $('loopSnapWindow'),
   loopXfade: $('loopXfade'),
+  xfadeCurve: $('xfadeCurve'),
   cropAfterLoop: $('cropAfterLoop'),
   midiPortSelect: $('midiPortSelect'),
   turboSpeed: $('turboSpeed'),
@@ -1519,7 +1528,7 @@ function findBestLoopEnd(data, scaledPos, matchVal, matchSlope, window) {
 //     - samples [loopStart .. loopStart+xf-1] (fade in: 0→1)
 //   So the tail of the loop absorbs the beginning of the loop, blended.
 //   loopStart itself is unchanged — the loop jumps back there cleanly.
-function applyLoopCrossfade(data, loopStart, loopEnd, xfLen) {
+function applyLoopCrossfade(data, loopStart, loopEnd, xfLen, curve = 'linear') {
   if (xfLen <= 0) return;
   // Clamp xfLen so it fits within the loop and the pre-loop material
   const maxXf = Math.min(xfLen, loopStart, loopEnd - loopStart);
@@ -1546,9 +1555,36 @@ function applyLoopCrossfade(data, loopStart, loopEnd, xfLen) {
   // At loopEnd, the tail has fully transitioned to sound like the audio just
   // before loopStart — so the jump back to loopStart is seamless.
   for (let i = 0; i < maxXf; i++) {
-    const t        = (i + 1) / maxXf;
-    const gainTail = Math.cos(t * Math.PI * 0.5);  // 1→0
-    const gainPre  = Math.sin(t * Math.PI * 0.5);  // 0→1
+    const t = (i + 1) / maxXf;  // 0→1 approaching loopEnd
+    // gainPre: how much pre-roll to blend in (0→1)
+    // gainTail: how much original tail to keep  (1→0)
+    let gainPre;
+    switch (curve) {
+      case 'logarithmic':
+        // Fades in quickly at first, then slows — natural-feeling for many sounds
+        gainPre = Math.log(1 + t * (Math.E - 1));       // log base e, normalised 0→1
+        break;
+      case 'equal_power':
+        gainPre = Math.sin(t * Math.PI * 0.5);           // sin curve, equal power with cos
+        break;
+      case 'sine':
+        // Full S-curve: slow start, fast middle, slow end
+        gainPre = 0.5 - 0.5 * Math.cos(t * Math.PI);
+        break;
+      case 'exponential':
+        // Stays near 0 for a long time then rises sharply at the end
+        gainPre = Math.pow(t, 3);
+        break;
+      case 'square_root':
+        // Fades in very quickly, then flattens — opposite of exponential
+        gainPre = Math.sqrt(t);
+        break;
+      case 'linear':
+      default:
+        gainPre = t;  // straight line 0→1
+        break;
+    }
+    const gainTail = 1 - gainPre;  // always the complement
 
     // tail: last maxXf samples of the loop
     const tailIdx = loopEnd - maxXf + 1 + i;
@@ -1939,9 +1975,9 @@ async function processItem(item, settings) {
 
   // Step 5: Loop crossfade and/or crop
   // Apply to BOTH the MD-ready buffer and the HQ buffer so they are consistent.
-  function applyPostProcess(data, ls, le, doXfade, xfLen, doCrop) {
+  function applyPostProcess(data, ls, le, doXfade, xfLen, curve, doCrop) {
     let d = doXfade && le > ls ? new Float32Array(data) : data;
-    if (doXfade && le > ls) applyLoopCrossfade(d, ls, le, xfLen);
+    if (doXfade && le > ls) applyLoopCrossfade(d, ls, le, xfLen, curve);
     if (doCrop  && le > ls) d = cropAfterLoop(d, le);
     return d;
   }
@@ -1952,15 +1988,16 @@ async function processItem(item, settings) {
   if (hasLoop) {
     const doXfade = settings.loopXfade > 0;
     const doCrop  = settings.cropAfterLoop;
+    const curve   = settings.xfadeCurve;
     // MD-ready (at dstRate)
     processedData = applyPostProcess(
-      resampledData, loopStart, loopEnd, doXfade, settings.loopXfade, doCrop
+      resampledData, loopStart, loopEnd, doXfade, settings.loopXfade, curve, doCrop
     );
     // HQ (at dstRate*2) — loop points are at 2× coordinates
     processedHqData = applyPostProcess(
       hqData,
       Math.round(loopStart * 2), Math.round(loopEnd * 2),
-      doXfade, settings.loopXfade * 2, doCrop
+      doXfade, settings.loopXfade * 2, curve, doCrop
     );
   }
 
@@ -2020,6 +2057,7 @@ function getSettings() {
     sincTaps: dom.sincTaps.value,
     loopSnapWindow: parseInt(dom.loopSnapWindow.value) || 0,
     loopXfade: parseInt(dom.loopXfade.value) || 0,
+    xfadeCurve: dom.xfadeCurve.value,
     cropAfterLoop: dom.cropAfterLoop.checked,
   };
 }
