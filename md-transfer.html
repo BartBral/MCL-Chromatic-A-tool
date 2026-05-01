@@ -897,6 +897,12 @@ input[type=checkbox] {
           <option value="64">Fast (low)</option>
         </select>
       </div>
+      <div class="sep"></div>
+      <div class="setting-group">
+        <span class="lbl">Loop Snap</span>
+        <input type="number" id="loopSnapWindow" value="32" min="0" max="512" style="width:60px" title="Search window in samples for loop point snap. 0 = disabled.">
+        <span class="lbl" style="color:var(--text-dim);font-size:0.65rem">smp</span>
+      </div>
     </div>
 
     <!-- batch confirm banner -->
@@ -1187,6 +1193,7 @@ const dom = {
   customSampleRate: $('customSampleRate'),
   monoMode: $('monoMode'),
   sincTaps: $('sincTaps'),
+  loopSnapWindow: $('loopSnapWindow'),
   midiPortSelect: $('midiPortSelect'),
   turboSpeed: $('turboSpeed'),
   sdsHandshake: $('sdsHandshake'),
@@ -1457,25 +1464,34 @@ function rescaleLoopPoints(loopStart, loopEnd, srcLen, dstLen) {
   };
 }
 
-// --- Snap a sample index to the nearest zero crossing in floatData ---
-// Searches outward from 'pos' within ±window samples.
-// A zero crossing is where consecutive samples have opposite signs.
-// Returns the index of the sample just AFTER the crossing (value closest to 0).
-function snapToZeroCrossing(floatData, pos, window) {
-  const len = floatData.length;
-  pos = Math.max(1, Math.min(len - 2, pos));
-  // Search outward: check pos itself first, then pos±1, pos±2, ...
-  for (let delta = 0; delta <= window; delta++) {
-    for (const dir of (delta === 0 ? [0] : [-1, 1])) {
-      const i = pos + delta * (dir === 0 ? 0 : dir);
-      if (i < 1 || i >= len - 1) continue;
-      if (floatData[i - 1] * floatData[i] <= 0) {
-        // Zero crossing between i-1 and i — pick the sample closer to zero
-        return Math.abs(floatData[i]) <= Math.abs(floatData[i - 1]) ? i : i - 1;
-      }
-    }
+// --- Find best loop start: sample in output whose value AND slope
+//     most closely match the source loop start value and slope.
+//     'targetVal'   = value at source loopStart (float32)
+//     'targetSlope' = sign of slope at source loopStart (+1 ascending, -1 descending, 0 flat)
+//     'window'      = ±samples to search
+function findBestLoopStart(data, scaledPos, targetVal, targetSlope, window) {
+  const len = data.length;
+  const center = Math.max(1, Math.min(len - 2, scaledPos));
+  if (window <= 0) return center;
+  let bestIdx = center;
+  let bestScore = Infinity;
+  for (let i = Math.max(1, center - window); i <= Math.min(len - 2, center + window); i++) {
+    const slope = Math.sign(data[i] - data[i - 1]);
+    const valDiff = Math.abs(data[i] - targetVal);
+    // Slope mismatch penalty: 2× the full value range (0..2 for floats in -1..1)
+    const slopePenalty = (slope !== targetSlope) ? 2.0 : 0.0;
+    const score = valDiff + slopePenalty;
+    if (score < bestScore) { bestScore = score; bestIdx = i; }
   }
-  return pos; // no zero crossing found in window, return original
+  return bestIdx;
+}
+
+// --- Find best loop end: sample in output whose value AND slope
+//     most closely match those at loopStart — so the jump
+//     loopEnd → loopStart is as seamless as possible.
+function findBestLoopEnd(data, scaledPos, matchVal, matchSlope, window) {
+  // Identical algorithm — just matching a different target
+  return findBestLoopStart(data, scaledPos, matchVal, matchSlope, window);
 }
 
 // --- Dither & convert to 16-bit PCM ---
@@ -1782,12 +1798,37 @@ async function processItem(item, settings) {
     const srcLoopStart = Math.max(0, Math.min(wav.numSamples - 1, wav.loopStart));
     const srcLoopEnd   = Math.max(0, Math.min(wav.numSamples - 1, wav.loopEnd));
     const scaled = rescaleLoopPoints(srcLoopStart, srcLoopEnd, wav.numSamples, resampledData.length);
-    // Snap to nearest zero crossing in the resampled output.
-    // The sinc interpolation shifts the phase of zero crossings by a few samples —
-    // snapping guarantees a click-free loop boundary in the output waveform.
-    const snapWindow = Math.max(16, Math.round(resampledData.length / wav.numSamples) * 4);
-    loopStart = snapToZeroCrossing(resampledData, scaled.start, snapWindow);
-    loopEnd   = snapToZeroCrossing(resampledData, scaled.end,   snapWindow);
+    const snapWindow = settings.loopSnapWindow;
+    if (snapWindow > 0) {
+      // Step 1: find loopStart in output that best matches source loop start
+      //   value and slope direction — preserves the character of the original loop point.
+      // monoData is the mono float32 source BEFORE resampling, range -1..1.
+      const srcStartVal   = srcLoopStart < monoData.length
+        ? monoData[srcLoopStart] : 0;
+      const srcStartPrev  = srcLoopStart > 0
+        ? monoData[srcLoopStart - 1] : srcStartVal;
+      const srcStartSlope = Math.sign(srcStartVal - srcStartPrev);
+
+      loopStart = findBestLoopStart(
+        resampledData, scaled.start, srcStartVal, srcStartSlope, snapWindow
+      );
+
+      // Step 2: find loopEnd in output whose value+slope matches loopStart —
+      //   so the jump loopEnd→loopStart is seamless in both value and direction.
+      const lsVal   = resampledData[loopStart];
+      const lsSlope = loopStart > 0
+        ? Math.sign(resampledData[loopStart] - resampledData[loopStart - 1])
+        : 0;
+
+      loopEnd = findBestLoopEnd(
+        resampledData, scaled.end, lsVal, lsSlope, snapWindow
+      );
+      // loopEnd must be after loopStart and before end of buffer
+      loopEnd = Math.max(loopStart + 1, Math.min(resampledData.length - 1, loopEnd));
+    } else {
+      loopStart = scaled.start;
+      loopEnd   = scaled.end;
+    }
     hasLoop = true;
   }
   if (item.overrideLoop) {
@@ -1853,6 +1894,7 @@ function getSettings() {
     targetSampleRate: rate,
     monoMode: dom.monoMode.value,
     sincTaps: dom.sincTaps.value,
+    loopSnapWindow: parseInt(dom.loopSnapWindow.value) || 0,
   };
 }
 
