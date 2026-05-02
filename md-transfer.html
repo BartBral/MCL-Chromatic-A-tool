@@ -979,15 +979,13 @@ input[type=checkbox] {
 
 
 
-    <div class="panel-footer">
-      <button class="btn btn-green" id="btnSendAll" style="background:#183060;border-color:var(--green);color:var(--green)">▶▶ SEND ALL</button>
-      <button class="btn btn-green" id="btnSendSelected">▶ SEND SELECTED</button>
-      <button class="btn btn-red" id="btnAbortSend" style="display:none">■ ABORT</button>
-      <div style="flex:1"></div>
+    <div class="panel-footer" style="justify-content:flex-end">
       <div class="send-progress-bar" id="sendProgressBar" style="display:none">
         <div class="send-progress-fill" id="sendProgressFill" style="width:0%"></div>
       </div>
-      <span class="turbo-indicator" id="turboIndicator">1× STD</span>
+      <button class="btn btn-red" id="btnAbortSend" style="display:none">■ ABORT</button>
+      <button class="btn btn-green" id="btnSendSelected">▶ SEND SELECTED</button>
+      <button class="btn btn-green" id="btnSendAll" style="background:#183060;border-color:var(--green);color:var(--green)">▶▶ SEND ALL</button>
     </div>
   </section>
 
