@@ -1892,8 +1892,10 @@ function flattenSDS(packets, nameSysEx) {
 // SECTION 9: CORE PROCESSING PIPELINE
 // ============================================================
 async function processItem(item, settings) {
-  setStatus(`Processing: ${item.name}…`, true);
   item.status = 'processing';
+  renderSourceItem(item);
+  // Await setSpinner so the browser paints the overlay BEFORE the DSP work starts
+  await setStatus(`Processing: ${item.name}…`, true);
   renderSourceItem(item);
 
   const wav = parseWAV(item.rawBuffer);
@@ -2987,22 +2989,30 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function setStatus(msg, spin = false, type = '') {
   dom.statusText.textContent = msg;
   dom.statusText.className = 'status-text' + (type ? ' ' + type : '');
-  setSpinner(spin, msg);
+  return setSpinner(spin, msg);  // propagate Promise so callers can await
 }
 function setSpinner(on, msg = '') {
   dom.globalSpinner.className = 'spinner' + (on ? ' active' : '');
   const overlay = document.getElementById('procOverlay');
-  if (!overlay) return;
+  if (!overlay) return Promise.resolve();
   if (on) {
     overlay.classList.add('active');
     const labelEl = document.getElementById('procLabel');
     const fileEl  = document.getElementById('procFile');
-    // Extract filename from message if present (after 'Processing: ')
-    const match = msg.match(/Processing:\s*(.+)/i) || msg.match(/(.+\.wav.*)$/i);
     if (labelEl) labelEl.textContent = 'Processing…';
-    if (fileEl)  fileEl.textContent  = match ? match[1] : msg;
+    if (fileEl) {
+      // Extract filename from status message
+      const m = msg.match(/Processing:\s*(.+)/i);
+      fileEl.textContent = m ? m[1] : msg;
+    }
+    // Return a Promise that resolves after TWO animation frames —
+    // the first frame schedules the paint, the second confirms it has happened.
+    // Without this yield, the browser never renders the overlay before
+    // the JS thread is locked by the DSP resampler loop.
+    return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   } else {
     overlay.classList.remove('active');
+    return Promise.resolve();
   }
 }
 
