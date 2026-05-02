@@ -979,24 +979,15 @@ input[type=checkbox] {
 
 
 
-    <div class="panel-footer" style="flex-direction:column;gap:6px;padding:8px 16px">
-      <div style="display:flex;align-items:center;gap:6px;width:100%">
-        <div class="gauge-track" style="flex:1">
-          <div class="gauge-fill" id="memGaugeFill" style="width:0%"></div>
-        </div>
-        <span class="mem-strip-numbers" id="memNumbers" style="flex-shrink:0">0 / 2097152 B</span>
+    <div class="panel-footer">
+      <button class="btn btn-green" id="btnSendAll" style="background:#183060;border-color:var(--green);color:var(--green)">▶▶ SEND ALL</button>
+      <button class="btn btn-green" id="btnSendSelected">▶ SEND SELECTED</button>
+      <button class="btn btn-red" id="btnAbortSend" style="display:none">■ ABORT</button>
+      <div style="flex:1"></div>
+      <div class="send-progress-bar" id="sendProgressBar" style="display:none">
+        <div class="send-progress-fill" id="sendProgressFill" style="width:0%"></div>
       </div>
-      <div style="display:flex;align-items:center;gap:8px;width:100%">
-        <button class="btn btn-green" id="btnSendAll" style="background:#183060;border-color:var(--green);color:var(--green)">▶▶ SEND ALL</button>
-        <button class="btn btn-green" id="btnSendSelected">▶ SEND SELECTED</button>
-        <button class="btn btn-red" id="btnAbortSend" style="display:none">■ ABORT</button>
-        <div style="flex:1"></div>
-        <div class="send-progress-bar" id="sendProgressBar" style="display:none">
-          <div class="send-progress-fill" id="sendProgressFill" style="width:0%"></div>
-        </div>
-        <span class="turbo-indicator" id="turboIndicator" style="font-family:var(--font-mono);font-size:0.65rem;color:var(--text-dim)">1× STD</span>
-        <span id="footerMidiPort" style="font-family:var(--font-mono);font-size:0.65rem;color:var(--text-secondary);max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">NO PORT</span>
-      </div>
+      <span class="turbo-indicator" id="turboIndicator">1× STD</span>
     </div>
   </section>
 
@@ -1119,9 +1110,20 @@ input[type=checkbox] {
 <div class="status-bar">
   <div class="spinner" id="globalSpinner"></div>
   <span class="status-text" id="statusText">Ready — drop WAV files to begin</span>
-  <div class="midi-status" style="margin-left:auto;flex-shrink:0">
-    <div class="midi-dot" id="midiDot"></div>
-    <span id="midiLabel">NO MIDI</span>
+  <div style="margin-left:auto;display:flex;align-items:center;gap:12px;flex-shrink:0">
+    <!-- Mem gauge in footer -->
+    <div style="display:flex;flex-direction:column;gap:2px;width:120px;cursor:pointer" id="footerMemGauge" title="Click to open Settings">
+      <div class="gauge-track" style="width:100%">
+        <div class="gauge-fill" id="memGaugeFill" style="width:0%"></div>
+      </div>
+      <span class="mem-strip-numbers" id="memNumbers" style="font-size:0.58rem">0 B</span>
+    </div>
+    <!-- MIDI + turbo, click to open Settings -->
+    <div class="midi-status" id="footerMidiStatus" style="cursor:pointer" title="Click to open Settings">
+      <div class="midi-dot" id="midiDot"></div>
+      <span id="midiLabel">NO MIDI</span>
+      <span id="turboIndicator" class="turbo-indicator" style="margin-left:4px">1× STD</span>
+    </div>
   </div>
 </div>
 
@@ -1217,7 +1219,6 @@ const dom = {
   btnDownloadSyx: $('btnDownloadSyx'),
   btnAddToQueue: $('btnAddToQueue'),
   btnReprocess: $('btnReprocess'),
-  footerMidiPort: $('footerMidiPort'),
   btnSendAll: $('btnSendAll'),
   btnSendSelected: $('btnSendSelected'),
   btnAbortSend: $('btnAbortSend'),
@@ -2212,6 +2213,7 @@ function renderSourceItem(item, append = false) {
     <div class="sample-actions">
       ${item.status === 'done' ? `<button class="btn btn-ghost btn-icon src-play-btn${state.playingItemId === item.id ? ' playing' : ''}" title="${state.playingItemId === item.id ? 'Stop' : 'Play'}" data-action="play" data-id="${item.id}">${state.playingItemId === item.id ? '■' : '▶'}</button>` : ''}
       ${item.status === 'done' ? `<button class="btn btn-ghost btn-icon" title="Edit loop points" data-action="preview" data-id="${item.id}">✎</button>` : ''}
+      ${item.status === 'done' ? `<button class="btn btn-ghost btn-icon" title="Reprocess from original" data-action="reprocess" data-id="${item.id}" style="font-size:0.8rem">↺</button>` : ''}
       <button class="btn btn-ghost btn-icon" title="Remove" data-action="remove" data-id="${item.id}">✕</button>
     </div>
     ${item.status === 'processing' ? `<div class="sample-progress" style="width:60%"></div>` : ''}
@@ -2701,7 +2703,7 @@ function updateMIDIOutput() {
   state.midiOutput = id && state.midiAccess ? state.midiAccess.outputs.get(id) : null;
   const portName = state.midiOutput ? state.midiOutput.name : 'NO PORT';
   dom.midiLabel.textContent = portName.substring(0, 14);
-  if (dom.footerMidiPort) dom.footerMidiPort.textContent = portName.substring(0, 16);
+
 }
 
 async function sendSDS(slots) {
@@ -3060,6 +3062,15 @@ dom.sourceList.addEventListener('click', e => {
   } else if (action === 'preview') {
     const item = state.sourceFiles.find(f => f.id === id);
     openPlayer(item);
+  } else if (action === 'reprocess') {
+    const item = state.sourceFiles.find(f => f.id === id);
+    if (!item) return;
+    if (state.playingItemId === item.id) stopInlinePlayback();
+    item.processedBuffer = null; item.hqBuffer = null; item.pcm16 = null;
+    item.syxData = null; item.sdsPackets = null; item.nameSysEx = null;
+    item.status = 'idle'; item.error = null; item.overrideLoop = false;
+    renderSourceItem(item);
+    processItems([item]);
   }
 });
 
@@ -3144,13 +3155,17 @@ dom.waveform.addEventListener('click', e => {
 });
 
 // ---- SETTINGS MODAL ----
-document.getElementById('btnOpenSettings').addEventListener('click', () => {
+function openSettingsModal() {
   populateMIDIPorts();
   document.getElementById('settingsModal').classList.add('open');
-});
+}
+document.getElementById('btnOpenSettings').addEventListener('click', openSettingsModal);
 document.getElementById('btnCloseSettings').addEventListener('click', () => {
   document.getElementById('settingsModal').classList.remove('open');
 });
+// Footer gauge and midi status also open Settings
+document.getElementById('footerMemGauge').addEventListener('click', openSettingsModal);
+document.getElementById('footerMidiStatus').addEventListener('click', openSettingsModal);
 
 // ============================================================
 // SECTION 19: INIT
