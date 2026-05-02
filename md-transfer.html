@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MD Transfer — Machinedrum Sample Manager</title>
+<title>Say A! — MegaCommand Chromatic tool for MD</title>
 <style>
 /* ============================================================
    DESIGN: Industrial dark hardware aesthetic — like looking
@@ -842,8 +842,8 @@ input[type=checkbox] {
 <!-- ===== HEADER ===== -->
 <header class="app-header">
   <div class="app-logo">
-    <span class="brand">MD Transfer</span>
-    <span class="sub">SPS-1UW Sample Manager</span>
+    <span class="brand">Say A!</span>
+    <span class="sub">MegaCommand Chromatic tool for MD</span>
   </div>
 
   <button class="btn btn-ghost" id="btnOpenSettings" style="font-size:0.78rem;padding:5px 16px;letter-spacing:0.12em;border-color:var(--amber);color:var(--amber)">⚙ SETTINGS</button>
@@ -914,7 +914,7 @@ input[type=checkbox] {
       <div class="sep"></div>
       <div class="setting-group">
         <span class="lbl">Loop Snap</span>
-        <input type="number" id="loopSnapWindow" value="32" min="0" max="512" style="width:60px" title="Search window in samples for loop point snap. 0 = disabled.">
+        <input type="number" id="loopSnapWindow" value="256" min="0" max="512" style="width:60px" title="Search window in samples for loop point snap. 0 = disabled.">
         <span class="lbl" style="color:var(--text-dim);font-size:0.65rem">smp</span>
       </div>
       <div class="sep"></div>
@@ -934,7 +934,7 @@ input[type=checkbox] {
       <div class="sep"></div>
       <div class="setting-group">
         <span class="lbl" style="white-space:nowrap">Crop Loop</span>
-        <input type="checkbox" id="cropAfterLoop" title="Discard audio after loop end — saves MDUW memory">
+        <input type="checkbox" id="cropAfterLoop" checked title="Discard audio after loop end — saves MDUW memory">
       </div>
     </div>
 
@@ -957,9 +957,10 @@ input[type=checkbox] {
 
     <!-- footer -->
     <div class="panel-footer">
-      <button class="btn btn-amber" id="btnProcessSelected">⚙ PROCESS SELECTED</button>
+      <button class="btn btn-amber" id="btnProcessSelected">⚙ PROCESS</button>
+      <button class="btn btn-ghost" id="btnReprocess" title="Revert selected to original and reprocess with current settings">↺ REPROCESS</button>
       <button class="btn btn-ghost" id="btnDownloadProcessed">↓ WAV</button>
-      <button class="btn btn-ghost" id="btnDownloadHQ">↓ HQ WAV</button>
+      <button class="btn btn-ghost" id="btnDownloadHQ">↓ HQ</button>
       <button class="btn btn-ghost" id="btnDownloadSyx">↓ SYX</button>
       <div style="flex:1"></div>
       <button class="btn btn-ghost" id="btnAddToQueue">→ QUEUE</button>
@@ -978,22 +979,24 @@ input[type=checkbox] {
 
 
 
-    <div class="mem-strip">
-      <div class="gauge-track">
-        <div class="gauge-fill" id="memGaugeFill" style="width:0%"></div>
+    <div class="panel-footer" style="flex-direction:column;gap:6px;padding:8px 16px">
+      <div style="display:flex;align-items:center;gap:6px;width:100%">
+        <div class="gauge-track" style="flex:1">
+          <div class="gauge-fill" id="memGaugeFill" style="width:0%"></div>
+        </div>
+        <span class="mem-strip-numbers" id="memNumbers" style="flex-shrink:0">0 / 2097152 B</span>
       </div>
-      <span class="mem-strip-numbers" id="memNumbers">0 / 2097152 B</span>
-    </div>
-
-    <div class="panel-footer">
-      <button class="btn btn-green" id="btnSendAll" style="background:#183060;border-color:var(--green);color:var(--green)">▶▶ SEND ALL</button>
-      <button class="btn btn-green" id="btnSendSelected">▶ SEND SELECTED</button>
-      <button class="btn btn-red" id="btnAbortSend" style="display:none">■ ABORT</button>
-      <div style="flex:1"></div>
-      <div class="send-progress-bar" id="sendProgressBar" style="display:none">
-        <div class="send-progress-fill" id="sendProgressFill" style="width:0%"></div>
+      <div style="display:flex;align-items:center;gap:8px;width:100%">
+        <button class="btn btn-green" id="btnSendAll" style="background:#183060;border-color:var(--green);color:var(--green)">▶▶ SEND ALL</button>
+        <button class="btn btn-green" id="btnSendSelected">▶ SEND SELECTED</button>
+        <button class="btn btn-red" id="btnAbortSend" style="display:none">■ ABORT</button>
+        <div style="flex:1"></div>
+        <div class="send-progress-bar" id="sendProgressBar" style="display:none">
+          <div class="send-progress-fill" id="sendProgressFill" style="width:0%"></div>
+        </div>
+        <span class="turbo-indicator" id="turboIndicator" style="font-family:var(--font-mono);font-size:0.65rem;color:var(--text-dim)">1× STD</span>
+        <span id="footerMidiPort" style="font-family:var(--font-mono);font-size:0.65rem;color:var(--text-secondary);max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">NO PORT</span>
       </div>
-      <span class="turbo-indicator" id="turboIndicator">1× STD</span>
     </div>
   </section>
 
@@ -1125,7 +1128,7 @@ input[type=checkbox] {
 <script>
 // ============================================================
 // MD TRANSFER — Main Application Script
-// Machinedrum SPS-1UW Sample Manager
+// Say A! — MegaCommand Chromatic tool for MD
 // ============================================================
 
 // ============================================================
@@ -1213,6 +1216,8 @@ const dom = {
   btnDownloadHQ: $('btnDownloadHQ'),
   btnDownloadSyx: $('btnDownloadSyx'),
   btnAddToQueue: $('btnAddToQueue'),
+  btnReprocess: $('btnReprocess'),
+  footerMidiPort: $('footerMidiPort'),
   btnSendAll: $('btnSendAll'),
   btnSendSelected: $('btnSendSelected'),
   btnAbortSend: $('btnAbortSend'),
@@ -2694,7 +2699,9 @@ function populateMIDIPorts() {
 function updateMIDIOutput() {
   const id = dom.midiPortSelect.value;
   state.midiOutput = id && state.midiAccess ? state.midiAccess.outputs.get(id) : null;
-  dom.midiLabel.textContent = state.midiOutput ? state.midiOutput.name.substring(0, 14) : 'NO PORT';
+  const portName = state.midiOutput ? state.midiOutput.name : 'NO PORT';
+  dom.midiLabel.textContent = portName.substring(0, 14);
+  if (dom.footerMidiPort) dom.footerMidiPort.textContent = portName.substring(0, 16);
 }
 
 async function sendSDS(slots) {
@@ -2963,6 +2970,26 @@ dom.btnGo.addEventListener('click', async () => {
   dom.batchBanner.classList.remove('visible');
   await processItems(state.sourceFiles.filter(f => f.status === 'idle'));
 });
+dom.btnReprocess.addEventListener('click', () => {
+  const sel = state.sourceFiles.filter(f => state.selectedSourceIds.has(f.id));
+  const targets = sel.length ? sel : state.sourceFiles;
+  if (!targets.length) { setStatus('Nothing to reprocess', false, 'warn'); return; }
+  targets.forEach(item => {
+    // Reset processed state — rawBuffer is always kept, so we can reprocess from original
+    item.processedBuffer = null;
+    item.hqBuffer = null;
+    item.pcm16 = null;
+    item.syxData = null;
+    item.sdsPackets = null;
+    item.nameSysEx = null;
+    item.status = 'idle';
+    item.error = null;
+    item.overrideLoop = false;  // clear manual loop overrides so fresh loop points are calculated
+  });
+  renderSourceList();
+  processItems(targets);
+});
+
 dom.btnProcessSelected.addEventListener('click', () => {
   const sel = state.sourceFiles.filter(f => state.selectedSourceIds.has(f.id));
   const targets = sel.length ? sel : state.sourceFiles.filter(f => f.status === 'idle');
