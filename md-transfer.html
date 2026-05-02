@@ -504,8 +504,22 @@ input[type=number] { width: 70px; }
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  cursor: text;
 }
-.slot-name.empty { color: var(--text-dim); font-size: 0.7rem; text-shadow: none; }
+.slot-name.empty { color: var(--text-dim); font-size: 0.7rem; text-shadow: none; cursor: default; }
+.slot-name input.name-edit {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--text-amber);
+  background: var(--bg3);
+  border: 1px solid var(--amber);
+  border-radius: 2px;
+  width: 52px;
+  padding: 1px 3px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  outline: none;
+}
 .slot-detail {
   font-family: var(--font-mono);
   font-size: 0.62rem;
@@ -2087,6 +2101,7 @@ async function handleFiles(files) {
       nameSysEx: null,
       rootNote: srcRootNote,   // source root note for display before processing
       targetMidi: null,        // set after processing
+      customName: null,        // user-overridden 4-char MD name (null = auto from filename)
       loopStart: 0,
       loopEnd: 0,
       hasLoop: false,
@@ -2234,14 +2249,18 @@ function renderSlotGrid() {
 
     // Slot number displayed as 1-based (internal index stays 0-based)
     const displayNum = String(i + 1).padStart(2, '0');
-    const shortName  = item ? item.name.replace(/\.wav$/i, '').substring(0, 4).toUpperCase() : '';
+    const shortName  = item
+      ? (item.customName !== null && item.customName !== undefined
+          ? item.customName
+          : item.name.replace(/\.wav$/i, '').substring(0, 4).toUpperCase())
+      : '';
     const detail     = item
       ? `${fmtBytes(item.size || 0)}${item.processedSampleRate ? '  ' + fmtRate(item.processedSampleRate) : ''}`
       : '';
 
     el.innerHTML = `
       <span class="slot-num">${displayNum}</span>
-      <div class="slot-name ${sid ? '' : 'empty'}">${sid ? shortName : '—'}</div>
+      <div class="slot-name ${sid ? '' : 'empty'}" ${sid ? `data-slot-name="${i}" title="Click to rename"` : ''}>${sid ? shortName : '—'}</div>
       <div class="slot-detail">${detail}</div>
       <div class="slot-actions">
         ${sid ? `<button class="slot-play-btn${state.playingItemId === sid ? ' playing' : ''}" data-slot="${i}" title="${state.playingItemId === sid ? 'Stop' : 'Play'}">${state.playingItemId === sid ? '■' : '▶'}</button>` : ''}
@@ -2257,6 +2276,11 @@ function renderSlotGrid() {
         if (btn.classList.contains('slot-clear-btn')) { clearSlot(slotIdx); return; }
         if (btn.classList.contains('slot-play-btn'))  { playSlotInline(slotIdx); return; }
         if (btn.classList.contains('slot-edit-btn'))  { previewSlot(slotIdx); return; }
+      }
+      // Click on slot name → inline rename
+      if (e.target.dataset.slotName !== undefined && sid) {
+        startSlotRename(e.target, parseInt(e.target.dataset.slotName), item);
+        return;
       }
       toggleSelectSlot(i);
     });
@@ -2292,6 +2316,39 @@ function renderSlotGrid() {
 
     dom.slotGrid.appendChild(el);
   }
+}
+
+function startSlotRename(nameEl, slotIdx, item) {
+  const current = nameEl.textContent;
+  nameEl.textContent = '';
+  const input = document.createElement('input');
+  input.className = 'name-edit';
+  input.maxLength = 4;
+  input.value = current;
+  input.style.cssText = 'font-family:var(--font-mono);font-size:0.8rem;color:var(--text-amber);background:var(--bg3);border:1px solid var(--amber);border-radius:2px;width:52px;padding:1px 3px;letter-spacing:0.08em;text-transform:uppercase;outline:none;';
+  nameEl.appendChild(input);
+  input.focus();
+  input.select();
+
+  function commit() {
+    const val = input.value.toUpperCase().replace(/[^A-Z0-9\-_ ]/g, '').substring(0, 4).padEnd(4, ' ').trimEnd();
+    item.customName = val || null;
+    // Rebuild SDS/name SysEx with the new name
+    if (item.pcm16) {
+      const slot = state.slots.indexOf(item.id);
+      if (slot >= 0) rebuildSDS(item, slot);
+    }
+    renderSlotGrid();
+    setStatus(`Slot ${slotIdx + 1} renamed to "${item.customName || 'auto'}"`);
+  }
+
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter')  { e.preventDefault(); commit(); }
+    if (e.key === 'Escape') { item.customName = item.customName; renderSlotGrid(); }
+  });
+  input.addEventListener('blur', commit);
+  // Prevent the click from bubbling to slot selection
+  input.addEventListener('click', e => e.stopPropagation());
 }
 
 function previewSlot(slotIndex) {
@@ -2368,7 +2425,9 @@ function swapSlots(fromIdx, toIdx) {
 
 function rebuildSDS(item, slot) {
   if (!item.pcm16) return;
-  const nameStr = item.name.replace(/\.wav$/i, '');
+  const nameStr = item.customName !== null && item.customName !== undefined
+    ? item.customName
+    : item.name.replace(/\.wav$/i, '');
   item.sdsPackets = buildSDS(slot, item.pcm16, item.processedSampleRate, item.processedChannels,
     item.loopStart, item.loopEnd, item.hasLoop, nameStr);
   item.nameSysEx = buildNameSysEx(slot, nameStr);
