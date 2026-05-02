@@ -188,7 +188,7 @@ body {
 /* ---- MAIN LAYOUT ---- */
 .app-main {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 3fr 2fr;
   grid-template-rows: auto 1fr;
   gap: 0;
   height: calc(100vh - 57px);
@@ -774,6 +774,55 @@ input[type=checkbox] {
 
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* ---- PROCESSING OVERLAY ---- */
+.proc-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  background: #00000060;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(2px);
+}
+.proc-overlay.active { display: flex; }
+.proc-box {
+  background: var(--panel);
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius-lg);
+  padding: 28px 36px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  box-shadow: 0 20px 60px #00000090;
+}
+.proc-spinner {
+  width: 40px; height: 40px;
+  border: 3px solid var(--border);
+  border-top-color: var(--amber);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+.proc-label {
+  font-family: var(--font-ui);
+  font-weight: 600;
+  font-size: 0.85rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-amber);
+}
+.proc-file {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  max-width: 260px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ---- SCROLLBAR ---- */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: var(--bg0); }
@@ -1105,6 +1154,15 @@ input[type=checkbox] {
 </div>
 
 <!-- ===== STATUS BAR ===== -->
+<!-- ===== PROCESSING OVERLAY ===== -->
+<div class="proc-overlay" id="procOverlay">
+  <div class="proc-box">
+    <div class="proc-spinner"></div>
+    <div class="proc-label" id="procLabel">Processing…</div>
+    <div class="proc-file" id="procFile"></div>
+  </div>
+</div>
+
 <div class="status-bar">
   <div class="spinner" id="globalSpinner"></div>
   <span class="status-text" id="statusText">Ready — drop WAV files to begin</span>
@@ -2929,9 +2987,24 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function setStatus(msg, spin = false, type = '') {
   dom.statusText.textContent = msg;
   dom.statusText.className = 'status-text' + (type ? ' ' + type : '');
-  setSpinner(spin);
+  setSpinner(spin, msg);
 }
-function setSpinner(on) { dom.globalSpinner.className = 'spinner' + (on ? ' active' : ''); }
+function setSpinner(on, msg = '') {
+  dom.globalSpinner.className = 'spinner' + (on ? ' active' : '');
+  const overlay = document.getElementById('procOverlay');
+  if (!overlay) return;
+  if (on) {
+    overlay.classList.add('active');
+    const labelEl = document.getElementById('procLabel');
+    const fileEl  = document.getElementById('procFile');
+    // Extract filename from message if present (after 'Processing: ')
+    const match = msg.match(/Processing:\s*(.+)/i) || msg.match(/(.+\.wav.*)$/i);
+    if (labelEl) labelEl.textContent = 'Processing…';
+    if (fileEl)  fileEl.textContent  = match ? match[1] : msg;
+  } else {
+    overlay.classList.remove('active');
+  }
+}
 
 // ============================================================
 // SECTION 18: EVENT WIRING
