@@ -1131,8 +1131,22 @@ input[type=checkbox] {
 <!-- ===== ROOT NOTE MODAL ===== -->
 <div class="modal-overlay" id="rootNoteModal">
   <div class="modal-box">
-    <h3>Root Note Unknown</h3>
-    <p id="rootNoteModalMsg">No instrument chunk found in this file. Please select the root note:</p>
+    <h3>Root Note</h3>
+    <p id="rootNoteModalMsg">No root note found. Select the root note:</p>
+    <div id="tunerResult" style="display:none;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px;margin-bottom:12px;font-family:var(--font-mono);font-size:0.75rem">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+        <span style="color:var(--text-secondary)">FFT DETECTED:</span>
+        <span id="tunerNote" style="color:var(--text-amber);font-size:1rem;font-weight:700"></span>
+        <span id="tunerFreq" style="color:var(--text-secondary)"></span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="color:var(--text-secondary)">CONFIDENCE:</span>
+        <div style="flex:1;height:5px;background:var(--bg3);border-radius:2px;overflow:hidden">
+          <div id="tunerConfBar" style="height:100%;border-radius:2px;transition:width 0.3s"></div>
+        </div>
+        <span id="tunerConfLabel" style="min-width:48px;text-align:right"></span>
+      </div>
+    </div>
     <select id="rootNoteSelect" style="width:100%;margin:12px 0 16px"></select>
     <div class="modal-actions">
       <button class="btn btn-ghost" id="btnRootCancel">Skip</button>
@@ -2042,7 +2056,7 @@ async function processItem(item, settings) {
     rootMidi = instNote;
   } else {
     // Neither chunk has a root note — ask user
-    rootMidi = await askRootNote(item.name);
+    rootMidi = await askRootNote(item.name, monoData, wav.sampleRate);
   }
 
   if (rootMidi === null) { item.status = 'idle'; renderSourceItem(item); return; }
@@ -3074,19 +3088,174 @@ function downloadSelected(type) {
 // ============================================================
 // SECTION 16: MODALS & PROMPTS
 // ============================================================
-function askRootNote(filename) {
-  return new Promise(resolve => {
-    dom.rootNoteModalMsg.textContent = `No root note found in "${filename}". Select the root note:`;
+// ============================================================
+// FFT PITCH DETECTOR (HPS — Harmonic Product Spectrum)
+// ============================================================
+// Returns { midi, freq, confidence (0..1), note }
+// confidence < 0.15 = no clear pitch detected
+function detectPitch(monoFloat32, sampleRate) {
+  // Use up to 2 seconds, minimum 4096 samples
+  const MAX_SAMPLES = sampleRate * 2;
+  const data = monoFloat32.length > MAX_SAMPLES
+    ? monoFloat32.slice(0, MAX_SAMPLES)
+    : monoFloat32;
 
-    // Build dropdown: C0–G8, all 128 MIDI notes
+  // Choose FFT size: largest power of 2 <= data.length, min 4096 max 32768
+  let fftSize = 4096;
+  while (fftSize * 2 <= data.length && fftSize < 32768) fftSize *= 2;
+
+  // Apply Hann window to reduce spectral leakage
+  const windowed = new Float32Array(fftSize);
+  for (let i = 0; i < fftSize; i++) {
+    const w = 0.5 * (1 - Math.cos(2 * Math.PI * i / (fftSize - 1)));
+    windowed[i] = (i < data.length ? data[i] : 0) * w;
+  }
+
+  // FFT (Cooley-Tukey, in-place)
+  const re = new Float32Array(windowed);
+  const im = new Float32Array(fftSize);
+  for (let len = 2; len <= fftSize; len <<= 1) {
+    const half = len >> 1;
+    const step = 2 * Math.PI / len;
+    for (let i = 0; i < fftSize; i += len) {
+      for (let j = 0; j < half; j++) {
+        const cos = Math.cos(step * j);
+        const sin = Math.sin(step * j);
+        const tr =  cos * re[i+j+half] + sin * im[i+j+half];
+        const ti = -sin * re[i+j+half] + cos * im[i+j+half];
+        re[i+j+half] = re[i+j] - tr;
+        im[i+j+half] = im[i+j] - ti;
+        re[i+j]     += tr;
+        im[i+j]     += ti;
+      }
+    }
+  }
+  // Bit-reversal permutation
+  for (let i = 1, j = 0; i < fftSize; i++) {
+    let bit = fftSize >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) {
+      [re[i], re[j]] = [re[j], re[i]];
+      [im[i], im[j]] = [im[j], im[i]];
+    }
+  }
+
+  // Magnitude spectrum (only positive frequencies up to Nyquist)
+  const N = fftSize / 2;
+  const mag = new Float32Array(N);
+  for (let i = 0; i < N; i++) {
+    mag[i] = Math.sqrt(re[i]*re[i] + im[i]*im[i]);
+  }
+
+  // HPS: Harmonic Product Spectrum (5 harmonics)
+  // Multiply spectrum with its downsampled versions.
+  // The fundamental frequency is reinforced; harmonics cancel.
+  const HPS_HARMONICS = 5;
+  const hps = new Float32Array(N);
+  for (let i = 0; i < N; i++) hps[i] = mag[i];
+  for (let h = 2; h <= HPS_HARMONICS; h++) {
+    for (let i = 0; i < N; i++) {
+      const j = Math.floor(i * h);
+      if (j < N) hps[i] *= mag[j];
+    }
+  }
+
+  // Limit search to musically relevant range: C0 (16.35 Hz) to B8 (7902 Hz)
+  const freqPerBin = sampleRate / fftSize;
+  const minBin = Math.ceil(16.35 / freqPerBin);
+  const maxBin = Math.floor(7902  / freqPerBin);
+
+  // Find peak in HPS spectrum
+  let peakBin = minBin, peakVal = 0;
+  for (let i = minBin; i <= maxBin; i++) {
+    if (hps[i] > peakVal) { peakVal = hps[i]; peakBin = i; }
+  }
+
+  // Parabolic interpolation for sub-bin frequency accuracy
+  const alpha = peakBin > 0      ? hps[peakBin - 1] : 0;
+  const beta  = hps[peakBin];
+  const gamma = peakBin < N - 1  ? hps[peakBin + 1] : 0;
+  const denom = alpha - 2*beta + gamma;
+  const interp = denom !== 0 ? 0.5 * (alpha - gamma) / denom : 0;
+  const detectedFreq = (peakBin + interp) * freqPerBin;
+
+  // Convert frequency to MIDI note
+  const midi = Math.round(69 + 12 * Math.log2(detectedFreq / 440));
+  const midiClamped = Math.max(0, Math.min(127, midi));
+
+  // Confidence: ratio of peak to mean of spectrum in musical range
+  let sum = 0;
+  for (let i = minBin; i <= maxBin; i++) sum += hps[i];
+  const mean = sum / (maxBin - minBin + 1);
+  const confidence = mean > 0 ? Math.min(1, peakVal / (mean * 20)) : 0;
+
+  return {
+    midi:       midiClamped,
+    freq:       detectedFreq,
+    confidence: confidence,
+    note:       midiToNote(midiClamped),
+  };
+}
+
+function askRootNote(filename, monoData, sampleRate) {
+  return new Promise(resolve => {
     const sel = document.getElementById('rootNoteSelect');
+    const tunerDiv  = document.getElementById('tunerResult');
+    const tunerNote = document.getElementById('tunerNote');
+    const tunerFreq = document.getElementById('tunerFreq');
+    const tunerBar  = document.getElementById('tunerConfBar');
+    const tunerLbl  = document.getElementById('tunerConfLabel');
+
+    // Run FFT pitch detection if we have audio data
+    let detected = null;
+    if (monoData && monoData.length > 512 && sampleRate) {
+      detected = detectPitch(monoData, sampleRate);
+    }
+
+    // Build dropdown
     sel.innerHTML = '';
+    const defaultMidi = (detected && detected.confidence >= 0.15) ? detected.midi : 69;
     for (let midi = 0; midi <= 127; midi++) {
       const opt = document.createElement('option');
       opt.value = midi;
       opt.textContent = `${midiToNote(midi)}  (MIDI ${midi})`;
-      if (midi === 69) opt.selected = true; // default A4
+      if (midi === defaultMidi) opt.selected = true;
       sel.appendChild(opt);
+    }
+
+    // Show tuner result
+    if (detected) {
+      tunerDiv.style.display = '';
+      const conf = detected.confidence;
+      const strong = conf >= 0.5;
+      const medium = conf >= 0.15;
+
+      if (!medium) {
+        tunerNote.textContent = '—';
+        tunerFreq.textContent = 'No clear pitch detected';
+        tunerFreq.style.color = 'var(--text-dim)';
+        tunerBar.style.width = '0%';
+        tunerBar.style.background = 'var(--text-dim)';
+        tunerLbl.textContent = 'Weak';
+        tunerLbl.style.color = 'var(--text-dim)';
+        dom.rootNoteModalMsg.textContent = `No root note in "${filename}". FFT found no clear pitch — please select manually:`;
+      } else {
+        tunerNote.textContent = detected.note;
+        tunerFreq.textContent = `${detected.freq.toFixed(1)} Hz`;
+        tunerFreq.style.color = 'var(--text-secondary)';
+        const pct = Math.round(conf * 100);
+        const color = strong ? 'var(--green)' : 'var(--amber)';
+        const label = strong ? 'Strong' : 'Medium';
+        tunerBar.style.width = pct + '%';
+        tunerBar.style.background = color;
+        tunerLbl.textContent = label;
+        tunerLbl.style.color = color;
+        dom.rootNoteModalMsg.textContent = `No root note in "${filename}". FFT detected — confirm or override:`;
+      }
+    } else {
+      tunerDiv.style.display = 'none';
+      dom.rootNoteModalMsg.textContent = `No root note found in "${filename}". Select the root note:`;
     }
 
     dom.rootNoteModal.classList.add('open');
