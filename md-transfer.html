@@ -1792,6 +1792,111 @@ function buildWAV(pcmData, sampleRate, channels, bitsPerSample, loopStart, loopE
 }
 
 // ============================================================
+// SECTION 7b: SDS FILE PARSER (for drag-drop import)
+// ============================================================
+// Validates and decodes a .syx/.sds file containing MMA SDS dump.
+// Returns { ok, error, sampleRate, numSamples, hasLoop, loopStart, loopEnd,
+//           pcm16, name, slot } or { ok:false, error }
+function parseSysexFile(buffer) {
+  const bytes = new Uint8Array(buffer);
+  const result = {
+    ok: false, error: null,
+    sampleRate: 44100, numSamples: 0,
+    hasLoop: false, loopStart: 0, loopEnd: 0,
+    pcm16: null, name: null, slot: null,
+    bitsPerWord: 16,
+  };
+
+  // Helper: decode 3-byte 7-bit SDS value (LSB first)
+  const dec3 = (b, off) => b[off] | (b[off+1] << 7) | (b[off+2] << 14);
+
+  let i = 0;
+  let foundHeader = false;
+  const dataPackets = [];
+
+  while (i < bytes.length) {
+    // Find next F0
+    if (bytes[i] !== 0xF0) { i++; continue; }
+
+    // Need at least 3 bytes to identify message type
+    if (i + 2 >= bytes.length) break;
+
+    // Find matching F7
+    let end = i + 1;
+    while (end < bytes.length && bytes[end] !== 0xF7) end++;
+    if (end >= bytes.length) break;
+
+    const msg = bytes.slice(i, end + 1);
+
+    // Elektron name SysEx: F0 00 20 3C 02 00 73 <slot> <4chars> F7
+    if (msg.length === 13 &&
+        msg[1] === 0x00 && msg[2] === 0x20 && msg[3] === 0x3C &&
+        msg[4] === 0x02 && msg[5] === 0x00 && msg[6] === 0x73) {
+      result.slot = msg[7];
+      result.name = String.fromCharCode(msg[8], msg[9], msg[10], msg[11]).trimEnd();
+    }
+
+    // SDS Dump Header: F0 7E <dev> 01 <sn_lo> <sn_hi> <bits> <period×3> <len×3> <ls×3> <le×3> <type> F7
+    else if (msg.length === 21 && msg[1] === 0x7E && msg[3] === 0x01) {
+      result.slot        = result.slot !== null ? result.slot : (msg[4] | (msg[5] << 7));
+      result.bitsPerWord = msg[6];
+      const periodNs     = dec3(msg, 7);
+      result.sampleRate  = periodNs > 0 ? Math.round(1e9 / periodNs) : 44100;
+      result.numSamples  = dec3(msg, 10);
+      const lsRaw        = dec3(msg, 13);
+      const leRaw        = dec3(msg, 16);
+      const loopType     = msg[19];
+      result.hasLoop     = loopType !== 0x7F && leRaw !== 0x1FFFFF;
+      result.loopStart   = lsRaw;
+      result.loopEnd     = leRaw;
+      foundHeader        = true;
+    }
+
+    // SDS Data Packet: F0 7E <dev> 02 <pktNum> <120 bytes> <chk> F7 (127 bytes total)
+    else if (msg.length === 127 && msg[1] === 0x7E && msg[3] === 0x02) {
+      // Verify checksum: XOR of bytes 1..4 + all 120 data bytes
+      let chk = 0;
+      for (let k = 1; k < 125; k++) chk ^= msg[k];
+      chk &= 0x7F;
+      if (chk !== msg[125]) {
+        result.error = `Checksum error in packet ${msg[4]}`;
+        return result;
+      }
+      dataPackets.push({ pktNum: msg[4], data: msg.slice(5, 125) });
+    }
+
+    i = end + 1;
+  }
+
+  if (!foundHeader) {
+    result.error = 'No SDS Dump Header found — not a valid SDS file';
+    return result;
+  }
+  if (dataPackets.length === 0) {
+    result.error = 'No SDS data packets found';
+    return result;
+  }
+
+  // Sort packets by pktNum (wraps at 0x7F)
+  dataPackets.sort((a, b) => a.pktNum - b.pktNum);
+
+  // Decode 3×7-bit → 16-bit samples (offset binary → signed)
+  const pcm16 = new Int16Array(result.numSamples || dataPackets.length * 40);
+  let sampleIdx = 0;
+  for (const pkt of dataPackets) {
+    const d = pkt.data;
+    for (let k = 0; k < 120 && sampleIdx < pcm16.length; k += 3) {
+      const u = (d[k] << 9) | (d[k+1] << 2) | (d[k+2] >> 5);
+      pcm16[sampleIdx++] = u - 32768;  // offset binary → signed
+    }
+  }
+
+  result.pcm16 = pcm16;
+  result.ok    = true;
+  return result;
+}
+
+// ============================================================
 // SECTION 8: SDS SYSEX BUILDER
 // ============================================================
 function buildSDS(slot, pcm16Data, sampleRate, channels, loopStart, loopEnd, hasLoop, name) {
@@ -2365,16 +2470,25 @@ function renderSlotGrid() {
       // Only remove if we're actually leaving this element (not entering a child)
       if (!el.contains(e.relatedTarget)) el.classList.remove('drop-target');
     });
-    el.addEventListener('drop', e => {
+    el.addEventListener('drop', async e => {
       e.preventDefault();
       el.classList.remove('drop-target');
+
+      // External file drop (.syx / .sds)?
+      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        const file = e.dataTransfer.files[0];
+        const ext  = file.name.split('.').pop().toLowerCase();
+        if (ext === 'syx' || ext === 'sds') {
+          await importSysexIntoSlot(file, i);
+          return;
+        }
+      }
+
       const sourceSlot = parseInt(e.dataTransfer.getData('slot-source'));
       const sampleId   = parseInt(e.dataTransfer.getData('text/plain'));
       if (!isNaN(sourceSlot)) {
-        // Slot-to-slot swap
         swapSlots(sourceSlot, i);
       } else {
-        // From source list into slot
         assignToSlot(sampleId, i);
       }
     });
@@ -2473,6 +2587,65 @@ function assignToSlot(sampleId, slotIndex) {
   renderSlotGrid();
   updateMemGauge();
   setStatus(`Assigned "${item.name}" → slot ${slotIndex}`);
+}
+
+async function importSysexIntoSlot(file, slotIndex) {
+  setStatus(`Reading ${file.name}…`, true);
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+  const buffer = await file.arrayBuffer();
+  const parsed = parseSysexFile(buffer);
+
+  if (!parsed.ok) {
+    setStatus(`Import failed: ${parsed.error}`, false, 'err');
+    setSpinner(false);
+    return;
+  }
+
+  // Build WAV buffer from decoded PCM so the item integrates with existing pipeline
+  const name      = parsed.name || file.name.replace(/\.[^.]+$/, '').substring(0, 4).toUpperCase();
+  const sr        = parsed.sampleRate;
+  const wavBuf    = buildWAV(parsed.pcm16, sr, 1, 16,
+    parsed.loopStart, parsed.loopEnd, parsed.hasLoop, 69);
+
+  const item = {
+    id:                 nextId++,
+    name:               file.name,
+    rawBuffer:          buffer,       // keep original .syx as raw
+    processedBuffer:    wavBuf,
+    hqBuffer:           null,
+    pcm16:              parsed.pcm16,
+    syxData:            new Uint8Array(buffer), // original syx IS the syx data
+    sdsPackets:         null,
+    nameSysEx:          buildNameSysEx(slotIndex, name),
+    rootNote:           69,
+    targetMidi:         69,
+    customName:         name,
+    loopStart:          parsed.loopStart,
+    loopEnd:            parsed.loopEnd,
+    hasLoop:            parsed.hasLoop,
+    overrideLoop:       true,
+    status:             'done',
+    size:               wavBuf.byteLength,
+    error:              null,
+    processedSampleRate: sr,
+    processedChannels:  1,
+    srcInfo: {
+      sampleRate: sr,
+      hasLoop:    parsed.hasLoop,
+      loopStart:  parsed.loopStart,
+      loopEnd:    parsed.loopEnd,
+      rootNote:   69,
+    },
+  };
+
+  state.sourceFiles.push(item);
+  state.slots[slotIndex] = item.id;
+  renderSourceList();
+  renderSlotGrid();
+  updateMemGauge();
+  setSpinner(false);
+  setStatus(`Imported "${name}" → slot ${slotIndex + 1} (${fmtBytes(parsed.pcm16.byteLength)} · ${fmtRate(sr)})`);
 }
 
 function swapSlots(fromIdx, toIdx) {
