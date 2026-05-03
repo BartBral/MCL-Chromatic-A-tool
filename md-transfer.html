@@ -2042,29 +2042,29 @@ async function processItem(item, settings) {
     if (!proceed) { item.status = 'idle'; renderSourceItem(item); return; }
   }
 
+  // Step 1: Mono mixdown — must happen BEFORE root note detection
+  // so monoData is available for the FFT pitch detector.
+  let { data: monoData, channels: outChannels } = toMono(wav.audioData, wav.channels, settings.monoMode);
+  if (settings.monoMode !== 'stereo') outChannels = 1;
+
   // Determine root note — read from smpl and inst chunks independently
   const smplNote = wav.rootNoteSmpl; // from smpl chunk unity note (or null)
   const instNote = wav.rootNoteInst; // from inst chunk unshiftedNote (or null)
   let rootMidi = null;
 
   if (smplNote !== null && instNote !== null && smplNote !== instNote) {
-    // Both chunks present but disagree — ask user which to trust
     rootMidi = await askRootNoteConflict(item.name, smplNote, instNote);
   } else if (smplNote !== null) {
     rootMidi = smplNote;
   } else if (instNote !== null) {
     rootMidi = instNote;
   } else {
-    // Neither chunk has a root note — ask user
+    // Neither chunk — run FFT on monoData and ask user
     rootMidi = await askRootNote(item.name, monoData, wav.sampleRate);
   }
 
   if (rootMidi === null) { item.status = 'idle'; renderSourceItem(item); return; }
   item.rootNote = rootMidi;
-
-  // Step 1: Mono mixdown (before pitch shift)
-  let { data: monoData, channels: outChannels } = toMono(wav.audioData, wav.channels, settings.monoMode);
-  if (settings.monoMode !== 'stereo') outChannels = 1;
 
   // Steps 2+3 combined: pitch shift + resample in ONE sinc pass.
   // Pitch shifting IS resampling at a different ratio. Doing it as a separate
