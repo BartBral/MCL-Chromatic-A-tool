@@ -1880,14 +1880,19 @@ function parseSysexFile(buffer) {
   // Sort packets by pktNum (wraps at 0x7F)
   dataPackets.sort((a, b) => a.pktNum - b.pktNum);
 
-  // Decode 3×7-bit → 16-bit samples (offset binary → signed)
-  const pcm16 = new Int16Array(result.numSamples || dataPackets.length * 40);
+  // Decode 3×7-bit → 16-bit samples.
+  // The MMA SDS spec says two's complement. This is what the Machinedrum sends
+  // when dumping, and what every external tool (C6 etc.) writes. Always use TC.
+  // Note: our OWN encoder uses offset binary (s+32768) for MD receive — but
+  // .syx files on disk from any standard tool use two's complement.
+  const totalSamples = result.numSamples || dataPackets.length * 40;
+  const pcm16 = new Int16Array(totalSamples);
   let sampleIdx = 0;
   for (const pkt of dataPackets) {
     const d = pkt.data;
-    for (let k = 0; k < 120 && sampleIdx < pcm16.length; k += 3) {
+    for (let k = 0; k < 120 && sampleIdx < totalSamples; k += 3) {
       const u = (d[k] << 9) | (d[k+1] << 2) | (d[k+2] >> 5);
-      pcm16[sampleIdx++] = u - 32768;  // offset binary → signed
+      pcm16[sampleIdx++] = u >= 32768 ? u - 65536 : u;  // two's complement
     }
   }
 
