@@ -3207,7 +3207,12 @@ function askRootNote(filename, monoData, sampleRate) {
     const tunerBar  = document.getElementById('tunerConfBar');
     const tunerLbl  = document.getElementById('tunerConfLabel');
 
-    // Run FFT pitch detection if we have audio data
+    // Yield to browser before FFT so the overlay/spinner is visible and animating.
+    // The FFT is synchronous and heavy — without this yield the thread locks
+    // before the browser gets a chance to paint.
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+    // Run FFT pitch detection
     let detected = null;
     if (monoData && monoData.length > 512 && sampleRate) {
       detected = detectPitch(monoData, sampleRate);
@@ -3258,14 +3263,20 @@ function askRootNote(filename, monoData, sampleRate) {
       dom.rootNoteModalMsg.textContent = `No root note found in "${filename}". Select the root note:`;
     }
 
+    // Hide the processing overlay while user interacts with this modal
+    const procOverlay = document.getElementById('procOverlay');
+    if (procOverlay) procOverlay.classList.remove('active');
+
     dom.rootNoteModal.classList.add('open');
 
     dom.btnRootConfirm.onclick = () => {
       dom.rootNoteModal.classList.remove('open');
+      if (procOverlay) procOverlay.classList.add('active');
       resolve(parseInt(sel.value));
     };
     dom.btnRootCancel.onclick = () => {
       dom.rootNoteModal.classList.remove('open');
+      if (procOverlay) procOverlay.classList.add('active');
       resolve(null);
     };
   });
@@ -3293,14 +3304,19 @@ Which should be used?`;
     sel.appendChild(optSmpl);
     sel.appendChild(optInst);
 
+    const procOverlay2 = document.getElementById('procOverlay');
+    if (procOverlay2) procOverlay2.classList.remove('active');
+
     dom.rootNoteModal.classList.add('open');
 
     dom.btnRootConfirm.onclick = () => {
       dom.rootNoteModal.classList.remove('open');
+      if (procOverlay2) procOverlay2.classList.add('active');
       resolve(parseInt(sel.value));
     };
     dom.btnRootCancel.onclick = () => {
       dom.rootNoteModal.classList.remove('open');
+      if (procOverlay2) procOverlay2.classList.add('active');
       resolve(null);
     };
   });
