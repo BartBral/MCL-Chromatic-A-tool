@@ -3150,34 +3150,24 @@ function detectPitch(monoFloat32, sampleRate) {
     mag[i] = Math.sqrt(re[i]*re[i] + im[i]*im[i]);
   }
 
-  // HPS: Harmonic Product Spectrum (5 harmonics)
-  // Multiply spectrum with its downsampled versions.
-  // The fundamental frequency is reinforced; harmonics cancel.
-  const HPS_HARMONICS = 5;
-  const hps = new Float32Array(N);
-  for (let i = 0; i < N; i++) hps[i] = mag[i];
-  for (let h = 2; h <= HPS_HARMONICS; h++) {
-    for (let i = 0; i < N; i++) {
-      const j = Math.floor(i * h);
-      if (j < N) hps[i] *= mag[j];
-    }
-  }
-
   // Limit search to musically relevant range: C0 (16.35 Hz) to B8 (7902 Hz)
   const freqPerBin = sampleRate / fftSize;
   const minBin = Math.ceil(16.35 / freqPerBin);
   const maxBin = Math.floor(7902  / freqPerBin);
 
-  // Find peak in HPS spectrum
+  // Find peak bin in magnitude spectrum
+  // Plain FFT peak with parabolic interpolation is sufficient and correct
+  // for both pure sines and harmonic-rich sounds. HPS was removed because
+  // the naive implementation (multiply by harmonics) kills pure sine fundamentals.
   let peakBin = minBin, peakVal = 0;
   for (let i = minBin; i <= maxBin; i++) {
-    if (hps[i] > peakVal) { peakVal = hps[i]; peakBin = i; }
+    if (mag[i] > peakVal) { peakVal = mag[i]; peakBin = i; }
   }
 
   // Parabolic interpolation for sub-bin frequency accuracy
-  const alpha = peakBin > 0      ? hps[peakBin - 1] : 0;
-  const beta  = hps[peakBin];
-  const gamma = peakBin < N - 1  ? hps[peakBin + 1] : 0;
+  const alpha = peakBin > minBin  ? mag[peakBin - 1] : 0;
+  const beta  = mag[peakBin];
+  const gamma = peakBin < N - 1   ? mag[peakBin + 1] : 0;
   const denom = alpha - 2*beta + gamma;
   const interp = denom !== 0 ? 0.5 * (alpha - gamma) / denom : 0;
   const detectedFreq = (peakBin + interp) * freqPerBin;
@@ -3186,9 +3176,10 @@ function detectPitch(monoFloat32, sampleRate) {
   const midi = Math.round(69 + 12 * Math.log2(detectedFreq / 440));
   const midiClamped = Math.max(0, Math.min(127, midi));
 
-  // Confidence: ratio of peak to mean of spectrum in musical range
+  // Confidence: ratio of peak energy to mean energy in the musical range.
+  // A clear tonal signal has a sharp peak far above the mean.
   let sum = 0;
-  for (let i = minBin; i <= maxBin; i++) sum += hps[i];
+  for (let i = minBin; i <= maxBin; i++) sum += mag[i];
   const mean = sum / (maxBin - minBin + 1);
   const confidence = mean > 0 ? Math.min(1, peakVal / (mean * 20)) : 0;
 
