@@ -3112,8 +3112,20 @@ function detectPitch(monoFloat32, sampleRate) {
   }
 
   // FFT (Cooley-Tukey, in-place)
+  // CRITICAL: bit-reversal permutation MUST come BEFORE the butterfly loops.
   const re = new Float32Array(windowed);
   const im = new Float32Array(fftSize);
+  // Step 1: Bit-reversal permutation
+  for (let i = 1, j = 0; i < fftSize; i++) {
+    let bit = fftSize >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) {
+      [re[i], re[j]] = [re[j], re[i]];
+      [im[i], im[j]] = [im[j], im[i]];
+    }
+  }
+  // Step 2: Butterfly loops
   for (let len = 2; len <= fftSize; len <<= 1) {
     const half = len >> 1;
     const step = 2 * Math.PI / len;
@@ -3128,16 +3140,6 @@ function detectPitch(monoFloat32, sampleRate) {
         re[i+j]     += tr;
         im[i+j]     += ti;
       }
-    }
-  }
-  // Bit-reversal permutation
-  for (let i = 1, j = 0; i < fftSize; i++) {
-    let bit = fftSize >> 1;
-    for (; j & bit; bit >>= 1) j ^= bit;
-    j ^= bit;
-    if (i < j) {
-      [re[i], re[j]] = [re[j], re[i]];
-      [im[i], im[j]] = [im[j], im[i]];
     }
   }
 
