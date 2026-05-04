@@ -2041,7 +2041,7 @@ async function processItem(item, settings) {
       'Loop Type Warning',
       `"${item.name}" has a ${typeName} loop. The Machinedrum only supports forward loops. Convert to forward loop and continue?`
     );
-    if (!proceed) { item.status = 'idle'; renderSourceItem(item); return; }
+    if (!proceed || state.abortProcess) { item.status = 'idle'; renderSourceItem(item); return; }
   }
 
   // Step 1: Mono mixdown — must happen BEFORE root note detection
@@ -2066,7 +2066,15 @@ async function processItem(item, settings) {
   }
 
   if (rootMidi === null) { item.status = 'idle'; renderSourceItem(item); return; }
+
+  // Check if user cancelled while the root note modal was open
+  if (state.abortProcess) { item.status = 'idle'; renderSourceItem(item); return; }
+
   item.rootNote = rootMidi;
+
+  // Reshow the processing overlay — it was hidden while the modal was open.
+  // Yield two frames so the browser paints it before the heavy DSP starts.
+  await setStatus(`Processing: ${item.name}…`, true);
 
   // Steps 2+3 combined: pitch shift + resample in ONE sinc pass.
   // Pitch shifting IS resampling at a different ratio. Doing it as a separate
@@ -3485,18 +3493,37 @@ dom.btnSendSelected.addEventListener('click', () => {
 });
 dom.btnAbortSend.addEventListener('click', () => { state.abortSend = true; });
 document.getElementById('btnCancelProcess').addEventListener('click', () => {
-  // Cancel whatever is currently running
   if (state.isSending) {
+    // Cancel SDS transfer
     state.abortSend = true;
     setStatus('Transfer cancelled', false, 'warn');
+    const ov = document.getElementById('procOverlay');
+    if (ov) ov.classList.remove('active');
+    dom.globalSpinner.className = 'spinner';
   } else {
+    // Cancel processing — set flag and also dismiss any open modal
+    // (root note modal may be open waiting for user input)
     state.abortProcess = true;
     setStatus('Processing cancelled', false, 'warn');
+    // Close root note modal if open — simulate clicking Skip
+    const rootModal = document.getElementById('rootNoteModal');
+    if (rootModal && rootModal.classList.contains('open')) {
+      rootModal.classList.remove('open');
+      // Trigger the cancel handler so the Promise resolves(null)
+      const cancelBtn = document.getElementById('btnRootCancel');
+      if (cancelBtn) cancelBtn.click();
+    }
+    // Close loop type warning modal if open
+    const batchModal = document.getElementById('batchConfirmModal');
+    if (batchModal && batchModal.classList.contains('open')) {
+      batchModal.classList.remove('open');
+      const cancelBtn = document.getElementById('btnBatchCancel');
+      if (cancelBtn) cancelBtn.click();
+    }
+    const ov = document.getElementById('procOverlay');
+    if (ov) ov.classList.remove('active');
+    dom.globalSpinner.className = 'spinner';
   }
-  // Hide the overlay immediately — the operation will clean up on next loop iteration
-  const ov = document.getElementById('procOverlay');
-  if (ov) ov.classList.remove('active');
-  dom.globalSpinner.className = 'spinner';
 });
 
 // Source list action delegation
