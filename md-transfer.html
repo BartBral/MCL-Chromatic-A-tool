@@ -1174,6 +1174,7 @@ input[type=checkbox] {
     <div class="proc-spinner"></div>
     <div class="proc-label" id="procLabel">Processing…</div>
     <div class="proc-file" id="procFile"></div>
+    <button class="btn btn-ghost" id="btnCancelProcess" style="margin-top:8px;font-size:0.72rem;padding:4px 14px;border-color:var(--border-bright)">✕ Cancel</button>
   </div>
 </div>
 
@@ -1252,6 +1253,7 @@ const state = {
   isSending: false,
   playingItemId: null,  // id of item currently playing inline
   abortSend: false,
+  abortProcess: false,
   pendingRootNoteResolve: null,
   playerItem: null,
   playerAudioCtx: null,
@@ -2238,12 +2240,19 @@ async function processItem(item, settings) {
 
 async function processItems(items) {
   const settings = getSettings();
+  state.abortProcess = false;
   setSpinner(true);
   for (const item of items) {
+    if (state.abortProcess) {
+      item.status = 'idle';
+      setStatus('Processing cancelled', false, 'warn');
+      break;
+    }
     if (item.status === 'processing') continue;
     await processItem(item, settings);
     await sleep(4); // yield to UI
   }
+  state.abortProcess = false;
   setSpinner(false);
   renderSourceList();
   updateMemGauge();
@@ -3476,6 +3485,10 @@ dom.btnSendSelected.addEventListener('click', () => {
   sendSDS([...state.selectedSlotIndices]);
 });
 dom.btnAbortSend.addEventListener('click', () => { state.abortSend = true; });
+document.getElementById('btnCancelProcess').addEventListener('click', () => {
+  state.abortProcess = true;
+  setStatus('Cancelling…', false, 'warn');
+});
 
 // Source list action delegation
 dom.sourceList.addEventListener('click', e => {
