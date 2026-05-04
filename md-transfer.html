@@ -3045,7 +3045,7 @@ async function sendSDS(slots) {
   dom.btnAbortSend.style.display = 'none';
   dom.sendProgressFill.style.width = '100%';
   setTimeout(() => { dom.sendProgressBar.style.display = 'none'; }, 1500);
-  setStatus(state.abortSend ? 'Transfer aborted' : 'Transfer complete', false, state.abortSend ? 'warn' : 'ok');
+  setStatus(state.abortSend ? 'Transfer cancelled' : 'Transfer complete', false, state.abortSend ? 'warn' : 'ok');
   setSpinner(false);
 }
 
@@ -3362,10 +3362,9 @@ function setSpinner(on, msg = '') {
     overlay.classList.add('active');
     const labelEl = document.getElementById('procLabel');
     const fileEl  = document.getElementById('procFile');
-    if (labelEl) labelEl.textContent = 'Processing…';
+    if (labelEl) labelEl.textContent = state.isSending ? 'Sending SDS…' : 'Processing…';
     if (fileEl) {
-      // Extract filename from status message
-      const m = msg.match(/Processing:\s*(.+)/i);
+      const m = msg.match(/(?:Processing|Sending):\s*(.+)/i);
       fileEl.textContent = m ? m[1] : msg;
     }
     // Return a Promise that resolves after TWO animation frames —
@@ -3486,8 +3485,18 @@ dom.btnSendSelected.addEventListener('click', () => {
 });
 dom.btnAbortSend.addEventListener('click', () => { state.abortSend = true; });
 document.getElementById('btnCancelProcess').addEventListener('click', () => {
-  state.abortProcess = true;
-  setStatus('Cancelling…', false, 'warn');
+  // Cancel whatever is currently running
+  if (state.isSending) {
+    state.abortSend = true;
+    setStatus('Transfer cancelled', false, 'warn');
+  } else {
+    state.abortProcess = true;
+    setStatus('Processing cancelled', false, 'warn');
+  }
+  // Hide the overlay immediately — the operation will clean up on next loop iteration
+  const ov = document.getElementById('procOverlay');
+  if (ov) ov.classList.remove('active');
+  dom.globalSpinner.className = 'spinner';
 });
 
 // Source list action delegation
