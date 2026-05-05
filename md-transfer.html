@@ -2009,7 +2009,8 @@ function buildNameSysEx(slot, name) {
 
 // Flatten all SDS packets for a slot into one Uint8Array (for .syx download)
 function flattenSDS(packets, nameSysEx) {
-  const parts = [nameSysEx, ...packets.map(p => p.data)];
+  // Order matches Python reference: header, data packets, name LAST
+  const parts = [...packets.map(p => p.data), nameSysEx];
   const total = parts.reduce((s, a) => s + a.length, 0);
   const out = new Uint8Array(total);
   let offset = 0;
@@ -3013,18 +3014,17 @@ async function sendSDS(slots) {
     rebuildSDS(item, slot);
     setStatus(`Sending slot ${slot}: ${item.name} (${item.sdsPackets.length} packets)`, true);
 
-    // Send name SysEx first
-    state.midiOutput.send(item.nameSysEx);
-    await sleep(baseDelay);
+    // Order: header first, then data packets, then name LAST
+    // This matches the Python reference script that is known to work with MD.
 
-    // Send header packet
+    // 1. Send dump header
     const headerPkt = item.sdsPackets.find(p => p.type === 'header');
     if (headerPkt) {
       state.midiOutput.send(headerPkt.data);
       await sleep(baseDelay);
     }
 
-    // Send data packets
+    // 2. Send data packets
     const dataPackets = item.sdsPackets.filter(p => p.type === 'data');
     for (const pkt of dataPackets) {
       if (state.abortSend) break;
@@ -3034,19 +3034,22 @@ async function sendSDS(slots) {
       dom.sendProgressFill.style.width = (sent / totalPackets * 100) + '%';
 
       if (closedLoop) {
-        // Wait for ACK/NAK — with timeout fallback
         const ack = await waitForACK(item.sdsMeta?.slot ?? slot, pkt.pktNum, 500);
         if (ack === 'nak') {
-          // Resend once
           state.midiOutput.send(pkt.data);
           await sleep(baseDelay);
         } else if (ack === 'timeout') {
-          // Fall back to open-loop with delay
           await sleep(baseDelay * 2);
         }
       } else {
         await sleep(baseDelay);
       }
+    }
+
+    // 3. Send name SysEx LAST (after all sample data)
+    if (!state.abortSend) {
+      state.midiOutput.send(item.nameSysEx);
+      await sleep(baseDelay);
     }
   }
 
