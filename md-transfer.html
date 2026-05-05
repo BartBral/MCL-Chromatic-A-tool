@@ -2549,24 +2549,30 @@ function startSlotRename(nameEl, slotIdx, item) {
   input.focus();
   input.select();
 
+  let committed = false;
   function commit() {
-    const val = input.value.toUpperCase().replace(/[^A-Z0-9\-_ ]/g, '').substring(0, 4).padEnd(4, ' ').trimEnd();
+    if (committed) return;  // prevent double-fire from Enter keydown + blur
+    committed = true;
+    const val = input.value.toUpperCase().replace(/[^A-Z0-9\-_ ]/g, '').substring(0, 4).trimEnd();
     item.customName = val || null;
-    // Rebuild SDS/name SysEx with the new name
-    if (item.pcm16) {
-      const slot = state.slots.indexOf(item.id);
-      if (slot >= 0) rebuildSDS(item, slot);
-    }
+    // Rebuild SDS/name SysEx with the new name immediately
+    const slot = state.slots.indexOf(item.id);
+    if (slot >= 0) rebuildSDS(item, slot);
     renderSlotGrid();
     setStatus(`Slot ${slotIdx + 1} renamed to "${item.customName || 'auto'}"`);
   }
 
+  function cancel() {
+    if (committed) return;
+    committed = true;
+    renderSlotGrid();
+  }
+
   input.addEventListener('keydown', e => {
     if (e.key === 'Enter')  { e.preventDefault(); commit(); }
-    if (e.key === 'Escape') { item.customName = item.customName; renderSlotGrid(); }
+    if (e.key === 'Escape') { cancel(); }
   });
   input.addEventListener('blur', commit);
-  // Prevent the click from bubbling to slot selection
   input.addEventListener('click', e => e.stopPropagation());
 }
 
