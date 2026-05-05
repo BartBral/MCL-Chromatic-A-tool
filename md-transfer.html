@@ -1962,18 +1962,21 @@ function buildSDS(slot, pcm16Data, sampleRate, channels, loopStart, loopEnd, has
       // Byte 1: bits  8-2  (u >> 2) & 0x7F
       // Byte 2: bits  1-0  (u & 0x03) << 5  — placed in bits 6-5
       // Bug was: (u << 5) & 0x60 which shifted wrong direction, corrupting low bits.
-      // Machinedrum expects OFFSET BINARY, not two's complement.
-      // MCL source confirms: encode_val = sample + (2^bits / 2)
-      // For 16-bit: add 32768 so that silence(0) -> 32768, max+ -> 65535, max- -> 0.
-      // Two's complement (wrong): silence -> [00 00 00], MD hears -32768 = wave-fold!
-      // Offset binary (correct):  silence -> [40 00 00], MD hears 0 = correct.
-      const u = (s + 32768) & 0xFFFF;     // offset binary: shift range 0..65535
-      chunk.push((u >> 9) & 0x7F);        // bits 15-9
-      chunk.push((u >> 2) & 0x7F);        // bits  8-2
-      chunk.push((u & 0x03) << 5);        // bits  1-0 shifted to bits 6-5
+      // Offset binary encoding matching the working Python reference script:
+      //   u16 = (s + 32768) & 0xFFFF
+      //   b2 = (u16 >> 9) & 0x7F   bits 15..9  (MSB)
+      //   b1 = (u16 >> 2) & 0x7F   bits  8..2  (mid)
+      //   b0 = (u16 >> 0) & 0x03   bits  1..0  (LSB, raw value 0..3, NOT shifted)
+      //   packet order: [b2, b1, b0]
+      const u = (s + 32768) & 0xFFFF;
+      chunk.push((u >> 9) & 0x7F);   // b2: bits 15..9
+      chunk.push((u >> 2) & 0x7F);   // b1: bits  8..2
+      chunk.push((u     ) & 0x03);   // b0: bits  1..0  (raw, 0-3, matches Python)
     }
-    // Checksum: XOR of pkt_num and all 120 data bytes
-    let chk = pktNum & 0x7F;
+    // Checksum per MMA SDS spec and Python reference:
+    // XOR of all bytes between F0 and F7 exclusive:
+    // 0x7E ^ device_id ^ 0x02 ^ pktNum ^ all_120_payload_bytes
+    let chk = 0x7E ^ SDS.DEVICE_ID ^ 0x02 ^ (pktNum & 0x7F);
     for (const b of chunk) chk ^= b;
     chk &= 0x7F;
 
