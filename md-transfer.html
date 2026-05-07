@@ -829,6 +829,52 @@ input[type=checkbox] {
 ::-webkit-scrollbar-thumb { background: var(--bg4); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--border-bright); }
 
+/* ---- SDS EXPERIMENT MODAL ---- */
+.exp-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.exp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.exp-field label {
+  font-family: var(--font-ui);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.exp-field input, .exp-field select {
+  width: 100%;
+}
+.hex-display {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: var(--green);
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  word-break: break-all;
+  line-height: 1.7;
+  min-height: 48px;
+  margin-bottom: 12px;
+}
+.hex-display .hdr-byte { color: var(--amber); }
+.exp-note {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+  line-height: 1.6;
+}
+
+/* ---- SEND PROGRESS ---- */
 /* ---- SEND PROGRESS ---- */
 .send-progress-bar {
   height: 3px;
@@ -1033,6 +1079,7 @@ input[type=checkbox] {
         <div class="send-progress-fill" id="sendProgressFill" style="width:0%"></div>
       </div>
       <button class="btn btn-red" id="btnAbortSend" style="display:none">■ ABORT</button>
+      <button class="btn btn-ghost" id="btnOpenExpModal" style="border-color:var(--red);color:var(--red);font-size:0.72rem">⚗ LAB</button>
       <button class="btn btn-green" id="btnSendSelected">▶ SEND SELECTED</button>
       <button class="btn btn-green" id="btnSendAll" style="background:#183060;border-color:var(--green);color:var(--green)">▶▶ SEND ALL</button>
     </div>
@@ -1151,6 +1198,81 @@ input[type=checkbox] {
     <div class="modal-actions">
       <button class="btn btn-ghost" id="btnRootCancel">Skip</button>
       <button class="btn btn-amber" id="btnRootConfirm">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SDS EXPERIMENT MODAL ===== -->
+<div class="modal-overlay" id="sdsExpModal">
+  <div class="modal-box" style="width:560px;max-width:96vw">
+    <h3 style="color:var(--red);margin-bottom:4px">⚠ SDS Experiment Lab</h3>
+    <p style="font-family:var(--font-mono);font-size:0.65rem;color:var(--text-secondary);margin-bottom:14px">
+      Deliberately corrupt SDS header metadata. May cause unexpected MD behaviour. Use at own risk.
+    </p>
+
+    <div class="exp-grid">
+      <div class="exp-field">
+        <label>Send to Slot</label>
+        <select id="expSlot"></select>
+      </div>
+      <div class="exp-field">
+        <label>PCM Data Source</label>
+        <select id="expPcmSource"></select>
+      </div>
+    </div>
+
+    <div class="exp-grid">
+      <div class="exp-field">
+        <label>Total Samples (header)</label>
+        <input type="number" id="expTotalSamples" min="0" max="16777215" value="0">
+      </div>
+      <div class="exp-field">
+        <label>Loop Type</label>
+        <select id="expLoopType">
+          <option value="0x00">0x00 — Forward loop</option>
+          <option value="0x7F" selected>0x7F — No loop</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="exp-grid">
+      <div class="exp-field">
+        <label>Loop Start (header)</label>
+        <input type="number" id="expLoopStart" min="0" max="16777215" value="0">
+      </div>
+      <div class="exp-field">
+        <label>Loop End (header)</label>
+        <input type="number" id="expLoopEnd" min="0" max="16777215" value="0">
+      </div>
+    </div>
+
+    <div class="exp-grid">
+      <div class="exp-field">
+        <label>Sample Rate (Hz)</label>
+        <input type="number" id="expSampleRate" min="1000" max="96000" value="44100">
+      </div>
+      <div class="exp-field">
+        <label>SDS Handshake</label>
+        <select id="expHandshake">
+          <option value="open" selected>Open-loop (no ACK)</option>
+          <option value="closed">Closed-loop (ACK/NAK)</option>
+        </select>
+      </div>
+    </div>
+
+    <label style="font-family:var(--font-ui);font-size:0.68rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-secondary);display:block;margin-bottom:6px">
+      Header Hex Preview
+    </label>
+    <div class="hex-display" id="expHexPreview">—</div>
+
+    <div class="exp-note" id="expNote">Select a slot and PCM source to preview.</div>
+
+    <div class="modal-actions" style="justify-content:space-between">
+      <button class="btn btn-ghost" id="btnExpClose">Close</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" id="btnExpPreview">↻ Preview Header</button>
+        <button class="btn btn-red" id="btnExpSend">▶ SEND EXPERIMENT</button>
+      </div>
     </div>
   </div>
 </div>
@@ -3658,6 +3780,209 @@ dom.waveform.addEventListener('click', e => {
   dom.loopStart.value = sample;
   const t = { ...state.playerItem, loopStart: sample, loopEnd: parseInt(dom.loopEnd.value), hasLoop: dom.loopEnabled.checked };
   drawWaveform(t);
+});
+
+// ---- SDS EXPERIMENT LAB ----
+function enc3(v) {
+  return [v & 0x7F, (v >> 7) & 0x7F, (v >> 14) & 0x7F];
+}
+
+function buildExpHeader(slot, totalSamples, sampleRate, loopStart, loopEnd, loopType) {
+  const sn      = slot & 0x7FFF;
+  const period  = Math.round(1e9 / sampleRate);
+  return new Uint8Array([
+    0xF0, 0x7E, SDS.DEVICE_ID, 0x01,
+    sn & 0x7F, (sn >> 7) & 0x7F,
+    16,
+    ...enc3(period),
+    ...enc3(totalSamples),
+    ...enc3(loopStart),
+    ...enc3(loopEnd),
+    loopType & 0x7F,
+    0xF7
+  ]);
+}
+
+function updateExpPreview() {
+  const slot        = parseInt(document.getElementById('expSlot').value);
+  const totalSmp    = parseInt(document.getElementById('expTotalSamples').value) || 0;
+  const sr          = parseInt(document.getElementById('expSampleRate').value)   || 44100;
+  const ls          = parseInt(document.getElementById('expLoopStart').value)    || 0;
+  const le          = parseInt(document.getElementById('expLoopEnd').value)      || 0;
+  const loopType    = parseInt(document.getElementById('expLoopType').value)     || 0x7F;
+  const srcId       = document.getElementById('expPcmSource').value;
+
+  const header = buildExpHeader(slot, totalSmp, sr, ls, le, loopType);
+  const hex    = Array.from(header).map(b => b.toString(16).padStart(2,'0').toUpperCase());
+
+  // Colour the meaningful bytes
+  const labels = ['F0','7E','dev','01','sn_lo','sn_hi','bits',
+    'per_lo','per_mi','per_hi',
+    'len_lo','len_mi','len_hi',
+    'ls_lo','ls_mi','ls_hi',
+    'le_lo','le_mi','le_hi',
+    'type','F7'];
+  const coloured = hex.map((b,i) => {
+    const tip = labels[i] || '';
+    if ([0,20].includes(i)) return `<span style="color:var(--text-dim)">${b}</span>`;
+    if ([3].includes(i))    return `<span style="color:var(--text-secondary)">${b}</span>`;
+    if ([10,11,12].includes(i)) return `<span class="hdr-byte" style="color:var(--red)">${b}·${tip}</span>`;
+    if ([13,14,15,16,17,18,19].includes(i)) return `<span class="hdr-byte">${b}·${tip}</span>`;
+    return `<span style="color:var(--text-primary)">${b}</span>`;
+  });
+  document.getElementById('expHexPreview').innerHTML = coloured.join(' ');
+
+  // Info note
+  const item = srcId ? state.sourceFiles.find(f => f.id === parseInt(srcId)) : null;
+  const actualSamples = item?.pcm16?.length || 0;
+  const actualPackets = item ? Math.ceil(actualSamples / 40) : 0;
+  const diff = totalSmp - actualSamples;
+  let note = '';
+  if (!item) {
+    note = 'No PCM source selected — header only will be sent.';
+  } else {
+    note = `PCM: "${item.name}" — ${actualSamples} samples, ${actualPackets} packets.
+`;
+    if (diff > 0)  note += `⚠ Header claims ${diff} MORE samples than data → MD reads ${diff} samples past end into adjacent RAM.`;
+    if (diff < 0)  note += `⚠ Header claims ${Math.abs(diff)} FEWER samples than data → MD closes buffer early, ignores last ${Math.abs(diff)} samples.`;
+    if (diff === 0) note += `✓ Header matches actual data length.`;
+    if (le > totalSmp) note += `
+⚠ loopEnd (${le}) > totalSamples (${totalSmp}) → MD loop pointer extends past declared length.`;
+  }
+  document.getElementById('expNote').textContent = note;
+}
+
+function populateExpDropdowns() {
+  const slotSel = document.getElementById('expSlot');
+  const pcmSel  = document.getElementById('expPcmSource');
+  const cfg     = getHWConfig();
+
+  slotSel.innerHTML = '';
+  for (let i = 0; i < cfg.slots; i++) {
+    const opt = document.createElement('option');
+    opt.value = i;
+    const sid  = state.slots[i];
+    const item = sid ? state.sourceFiles.find(f => f.id === sid) : null;
+    const name = item ? (item.customName || item.name.replace(/\.wav$/i,'').substring(0,4).toUpperCase()) : '—';
+    opt.textContent = `${String(i+1).padStart(2,'0')}  ${name}`;
+    slotSel.appendChild(opt);
+  }
+
+  pcmSel.innerHTML = '<option value="">— No PCM (header only) —</option>';
+  state.sourceFiles.filter(f => f.status === 'done').forEach(item => {
+    const opt = document.createElement('option');
+    opt.value = item.id;
+    opt.textContent = `${item.name.substring(0,24)} (${fmtBytes(item.pcm16?.byteLength||0)})`;
+    pcmSel.appendChild(opt);
+  });
+
+  // Auto-fill from selected slot
+  const firstOccupied = state.slots.findIndex(s => s !== null);
+  if (firstOccupied >= 0) {
+    slotSel.value = firstOccupied;
+    const sid = state.slots[firstOccupied];
+    if (sid) {
+      const item = state.sourceFiles.find(f => f.id === sid);
+      if (item) {
+        pcmSel.value = sid;
+        document.getElementById('expTotalSamples').value = item.pcm16?.length || 0;
+        document.getElementById('expSampleRate').value   = item.processedSampleRate || 44100;
+        document.getElementById('expLoopStart').value    = item.loopStart || 0;
+        document.getElementById('expLoopEnd').value      = item.loopEnd   || 0;
+        document.getElementById('expLoopType').value     = item.hasLoop ? '0x00' : '0x7F';
+      }
+    }
+  }
+  updateExpPreview();
+}
+
+// Auto-fill fields when slot selection changes
+document.getElementById('expSlot').addEventListener('change', function() {
+  const sid = state.slots[parseInt(this.value)];
+  if (sid) {
+    const item = state.sourceFiles.find(f => f.id === sid);
+    if (item && item.pcm16) {
+      document.getElementById('expPcmSource').value    = sid;
+      document.getElementById('expTotalSamples').value = item.pcm16.length;
+      document.getElementById('expSampleRate').value   = item.processedSampleRate || 44100;
+      document.getElementById('expLoopStart').value    = item.loopStart || 0;
+      document.getElementById('expLoopEnd').value      = item.loopEnd   || 0;
+      document.getElementById('expLoopType').value     = item.hasLoop ? '0x00' : '0x7F';
+    }
+  }
+  updateExpPreview();
+});
+
+// Update preview when any field changes
+['expPcmSource','expTotalSamples','expSampleRate','expLoopStart','expLoopEnd','expLoopType','expHandshake']
+  .forEach(id => document.getElementById(id).addEventListener('input', updateExpPreview));
+
+document.getElementById('btnExpPreview').addEventListener('click', updateExpPreview);
+
+document.getElementById('btnOpenExpModal').addEventListener('click', () => {
+  populateExpDropdowns();
+  document.getElementById('sdsExpModal').classList.add('open');
+});
+document.getElementById('btnExpClose').addEventListener('click', () => {
+  document.getElementById('sdsExpModal').classList.remove('open');
+});
+
+document.getElementById('btnExpSend').addEventListener('click', async () => {
+  if (!state.midiOutput) { setStatus('Select a MIDI port in Settings first', false, 'warn'); return; }
+
+  const slot      = parseInt(document.getElementById('expSlot').value);
+  const totalSmp  = parseInt(document.getElementById('expTotalSamples').value) || 0;
+  const sr        = parseInt(document.getElementById('expSampleRate').value)   || 44100;
+  const ls        = parseInt(document.getElementById('expLoopStart').value)    || 0;
+  const le        = parseInt(document.getElementById('expLoopEnd').value)      || 0;
+  const loopType  = parseInt(document.getElementById('expLoopType').value)     || 0x7F;
+  const srcId     = document.getElementById('expPcmSource').value;
+  const closedLoop = document.getElementById('expHandshake').value === 'closed';
+  const turbo     = parseInt(dom.turboSpeed.value) || 1;
+  const delay     = Math.round(SDS.PACKET_DELAY_MS / turbo);
+
+  const item = srcId ? state.sourceFiles.find(f => f.id === parseInt(srcId)) : null;
+
+  setStatus(`[LAB] Sending experiment to slot ${slot+1}…`, true);
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+  // 1. Send dump header with user-specified (possibly corrupted) values
+  const header = buildExpHeader(slot, totalSmp, sr, ls, le, loopType);
+  state.midiOutput.send(header);
+  await new Promise(r => setTimeout(r, delay));
+
+  if (closedLoop) {
+    const ack = await waitForACK(slot, 0, 1000);
+    setStatus(`[LAB] Header ACK: ${ack}`, false, ack === 'ack' ? 'ok' : 'warn');
+    await new Promise(r => setTimeout(r, delay));
+  }
+
+  // 2. Send actual PCM data packets (if source selected)
+  if (item?.pcm16) {
+    const nameStr = item.customName || item.name.replace(/\.wav$/i,'');
+    const packets = buildSDS(slot, item.pcm16, item.processedSampleRate || sr,
+      item.processedChannels || 1, ls, le, loopType === 0x00, nameStr);
+    const dataPackets = packets.filter(p => p.type === 'data');
+
+    for (let i = 0; i < dataPackets.length; i++) {
+      const pkt = dataPackets[i];
+      state.midiOutput.send(pkt.data);
+      if (closedLoop) {
+        const ack = await waitForACK(slot, pkt.pktNum, 500);
+        if (ack === 'nak') state.midiOutput.send(pkt.data);
+      } else {
+        await new Promise(r => setTimeout(r, delay));
+      }
+    }
+  }
+
+  // 3. Name SysEx last
+  const nameStr = item?.customName || item?.name?.replace(/\.wav$/i,'') || 'EXP';
+  state.midiOutput.send(buildNameSysEx(slot, nameStr));
+  await new Promise(r => setTimeout(r, delay));
+
+  setSpinner(false);
+  setStatus(`[LAB] Experiment sent to slot ${slot+1} — totalSamples=${totalSmp} ls=${ls} le=${le} type=0x${loopType.toString(16).toUpperCase()}`, false, 'ok');
 });
 
 // ---- SETTINGS MODAL ----
