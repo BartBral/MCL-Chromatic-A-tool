@@ -2712,8 +2712,15 @@ function rebuildSDS(item, slot) {
   const nameStr = item.customName !== null && item.customName !== undefined
     ? item.customName
     : item.name.replace(/\.wav$/i, '');
+  // Clamp loop points to actual pcm16 length — stale values from a previous
+  // processing run or edit can exceed the current buffer, causing the MD to
+  // read past the end of the sample into adjacent memory (other slots).
+  const maxSample = item.pcm16.length - 1;
+  const loopStart = Math.max(0, Math.min(item.loopStart || 0, maxSample));
+  const loopEnd   = Math.max(0, Math.min(item.loopEnd   || 0, maxSample));
+  const hasLoop   = item.hasLoop && loopEnd > loopStart;
   item.sdsPackets = buildSDS(slot, item.pcm16, item.processedSampleRate, item.processedChannels,
-    item.loopStart, item.loopEnd, item.hasLoop, nameStr);
+    loopStart, loopEnd, hasLoop, nameStr);
   item.nameSysEx = buildNameSysEx(slot, nameStr);
   item.syxData = flattenSDS(item.sdsPackets, item.nameSysEx);
 }
@@ -3009,6 +3016,11 @@ async function sendSDS(slots) {
   dom.turboIndicator.className = 'turbo-indicator' + (turbo > 1 ? ' active' : '');
   dom.turboIndicator.textContent = `${turbo}× ${turbo > 1 ? 'TURBO' : 'STD'}`;
 
+  // Rebuild ALL items first with their correct slot numbers,
+  // so totalPackets is accurate and headers have fresh sample lengths/loop points.
+  for (const { slot, item } of items) {
+    rebuildSDS(item, slot);
+  }
   let totalPackets = items.reduce((s, x) => s + (x.item.sdsPackets?.length || 0), 0);
   let sent = 0;
 
@@ -3016,8 +3028,6 @@ async function sendSDS(slots) {
 
   for (const { slot, item } of items) {
     if (state.abortSend) break;
-    // Rebuild SDS with correct slot
-    rebuildSDS(item, slot);
     setStatus(`Sending slot ${slot}: ${item.name} (${item.sdsPackets.length} packets)`, true);
 
     // Order: header first, then data packets, then name LAST
