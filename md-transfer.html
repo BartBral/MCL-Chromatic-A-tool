@@ -3186,6 +3186,10 @@ async function sendSDS(slots) {
 
     // 3. Send name SysEx LAST (after all sample data)
     if (!state.abortSend) {
+      // Log exactly what name bytes are going out so we can debug stale name
+      const nameBytes = Array.from(item.nameSysEx).map(b => b.toString(16).padStart(2,'0').toUpperCase());
+      console.log('[SDS] Name SysEx:', nameBytes.join(' '),
+        '→ name chars:', String.fromCharCode(...item.nameSysEx.slice(8, 12)));
       state.midiOutput.send(item.nameSysEx);
       await sleep(baseDelay);
     }
