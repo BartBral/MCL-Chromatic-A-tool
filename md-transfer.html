@@ -3188,8 +3188,10 @@ async function sendSDS(slots) {
     if (!state.abortSend) {
       // Log exactly what name bytes are going out so we can debug stale name
       const nameBytes = Array.from(item.nameSysEx).map(b => b.toString(16).padStart(2,'0').toUpperCase());
-      console.log('[SDS] Name SysEx:', nameBytes.join(' '),
-        '→ name chars:', String.fromCharCode(...item.nameSysEx.slice(8, 12)));
+      const slotByte  = item.nameSysEx[7];
+      const nameChars = String.fromCharCode(...item.nameSysEx.slice(8, 12));
+      console.log(`[SDS] Sending name: "${nameChars}" to slot byte=0x${slotByte.toString(16).padStart(2,'0')} (slot ${slotByte+1} on MD screen)`);
+      console.log('[SDS] Full name SysEx:', nameBytes.join(' '));
       state.midiOutput.send(item.nameSysEx);
       await sleep(baseDelay);
     }
