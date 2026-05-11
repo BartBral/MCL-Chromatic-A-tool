@@ -3182,17 +3182,10 @@ async function sendSDS(slots) {
       if (closedLoop) {
         const ack = await waitForACK(item.sdsMeta?.slot ?? slot, pkt.pktNum, 500);
         if (ack === 'nak') {
-          // Resend and wait full base delay
           state.midiOutput.send(pkt.data);
           await sleep(baseDelay);
         } else if (ack === 'timeout') {
-          // MD not responding — give it extra time before next packet
           await sleep(baseDelay * 2);
-        } else {
-          // ACK received — add a small post-ACK gap so MD can prepare for next packet.
-          // Without this, at 4x turbo the next packet arrives before MD is ready.
-          // Minimum 5ms regardless of turbo speed — empirically safe for MD firmware.
-          await sleep(Math.max(5, Math.round(baseDelay * 0.5)));
         }
       } else {
         await sleep(baseDelay);
@@ -3213,37 +3206,21 @@ async function sendSDS(slots) {
 function waitForACK(slotNum, pktNum, timeoutMs) {
   return new Promise(resolve => {
     if (!state.midiAccess) { resolve('timeout'); return; }
-
-    // Use addEventListener so we don't clobber other listeners and
-    // don't create a gap between cleanup and next packet's listener setup.
-    const inputs = [...state.midiAccess.inputs.values()];
-    let resolved = false;
+    const timer = setTimeout(() => { cleanup(); resolve('timeout'); }, timeoutMs);
 
     function onMessage(e) {
-      if (resolved) return;
       const d = e.data;
-      // Must be a universal non-realtime SysEx response
       if (d.length >= 6 && d[0] === SDS.HEADER && d[1] === SDS.MANU_ID) {
-        if (d[3] === SDS.WAIT) {
-          // MD needs more time — reset timeout and keep waiting
-          clearTimeout(timer);
-          timer = setTimeout(() => { cleanup(); resolve('timeout'); }, timeoutMs * 3);
-          return;
-        }
-        if (d[3] === SDS.ACK)    { cleanup(); resolve('ack'); }
-        else if (d[3] === SDS.NAK)    { cleanup(); resolve('nak'); }
+        if (d[3] === SDS.ACK) { cleanup(); resolve('ack'); }
+        else if (d[3] === SDS.NAK) { cleanup(); resolve('nak'); }
         else if (d[3] === SDS.CANCEL) { cleanup(); resolve('cancel'); }
       }
     }
-
     function cleanup() {
-      resolved = true;
       clearTimeout(timer);
-      inputs.forEach(inp => inp.removeEventListener('midimessage', onMessage));
+      for (const [, input] of state.midiAccess.inputs) input.onmidimessage = null;
     }
-
-    let timer = setTimeout(() => { cleanup(); resolve('timeout'); }, timeoutMs);
-    inputs.forEach(inp => inp.addEventListener('midimessage', onMessage));
+    for (const [, input] of state.midiAccess.inputs) input.onmidimessage = onMessage;
   });
 }
 
