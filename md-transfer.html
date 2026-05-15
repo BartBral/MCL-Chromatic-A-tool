@@ -2029,7 +2029,7 @@ function parseSysexFile(buffer) {
   for (const pkt of dataPackets) {
     const d = pkt.data;
     for (let k = 0; k < 120 && sampleIdx < totalSamples; k += 3) {
-      const u = (d[k] << 9) | (d[k+1] << 2) | (d[k+2] >> 5);
+      const u = (d[k] << 9) | (d[k+1] << 2) | (d[k+2] & 0x03);
       pcm16[sampleIdx++] = u >= 32768 ? u - 65536 : u;  // two's complement
     }
   }
