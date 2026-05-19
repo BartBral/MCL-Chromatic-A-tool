@@ -669,7 +669,8 @@ function parseSysexFile(buffer) {
 
     // SDS Data Packet: F0 7E <dev> 02 <pktNum> <120 bytes> <chk> F7 (127 bytes total)
     else if (msg.length === 127 && msg[1] === 0x7E && msg[3] === 0x02) {
-      // Verify checksum: XOR of bytes 1..4 + all 120 data bytes
+      // Verify checksum per MMA SDS spec: XOR of bytes at indices 1..124 inclusive
+      // (the 4 header bytes after F0, plus all 120 payload bytes), result masked to 7 bits.
       let chk = 0;
       for (let k = 1; k < 125; k++) chk ^= msg[k];
       chk &= 0x7F;
@@ -695,18 +696,18 @@ function parseSysexFile(buffer) {
   // Sort packets by pktNum (wraps at 0x7F)
   dataPackets.sort((a, b) => a.pktNum - b.pktNum);
 
-  // Decode 3×7-bit → 16-bit samples.
-  // Our encoder uses OFFSET BINARY: u = (s + 32768) & 0xFFFF
-  // Byte order: [b2=(u>>9)&0x7F, b1=(u>>2)&0x7F, b0=u&0x03]
-  // So decode: u = (d[k]<<9)|(d[k+1]<<2)|(d[k+2]&0x03), then s = u - 32768
+  // Decode 3×7-bit → signed 16-bit per MMA SDS spec (two's complement, no offset).
+  // Reconstruct the 16-bit value by shifting each 7-bit byte back to its original position,
+  // then sign-extend from bit 15 so negative samples are correctly represented in Int16Array.
   const totalSamples = result.numSamples || dataPackets.length * 40;
   const pcm16 = new Int16Array(totalSamples);
   let sampleIdx = 0;
   for (const pkt of dataPackets) {
     const d = pkt.data;
     for (let k = 0; k < 120 && sampleIdx < totalSamples; k += 3) {
-      const u = (d[k] << 9) | (d[k + 1] << 2) | (d[k + 2] & 0x03);
-      pcm16[sampleIdx++] = u - 32768;  // offset binary -> signed
+      let u = (d[k] << 9) | (d[k + 1] << 2) | (d[k + 2] & 0x03);
+      if (u & 0x8000) u |= 0xFFFF0000;  // sign-extend bit 15 → bits 31..16
+      pcm16[sampleIdx++] = u;            // Int16Array truncates to lower 16 bits
     }
   }
 
@@ -755,21 +756,16 @@ function buildSDS(slot, pcm16Data, sampleRate, channels, loopStart, loopEnd, has
     const chunk = [];
     for (let j = 0; j < SAMPLES_PER_PACKET; j++) {
       const s = i + j < totalSamples ? pcm16Data[i + j] : 0;
-      // SDS 16-bit to 3x7-bit packing (MMA spec):
-      // Byte 0: bits 15-9  (u >> 9) & 0x7F
-      // Byte 1: bits  8-2  (u >> 2) & 0x7F
-      // Byte 2: bits  1-0  (u & 0x03) << 5  — placed in bits 6-5
-      // Bug was: (u << 5) & 0x60 which shifted wrong direction, corrupting low bits.
-      // Offset binary encoding matching the working Python reference script:
-      //   u16 = (s + 32768) & 0xFFFF
-      //   b2 = (u16 >> 9) & 0x7F   bits 15..9  (MSB)
-      //   b1 = (u16 >> 2) & 0x7F   bits  8..2  (mid)
-      //   b0 = (u16 >> 0) & 0x03   bits  1..0  (LSB, raw value 0..3, NOT shifted)
+      // MMA SDS 16-bit → 3×7-bit packing (signed two's complement, no offset):
+      //   b2 = (s >> 9) & 0x7F   bits 15..9  (MSB, sign bit in position 6)
+      //   b1 = (s >> 2) & 0x7F   bits  8..2  (mid)
+      //   b0 =  s       & 0x03   bits  1..0  (LSB, raw value 0..3)
       //   packet order: [b2, b1, b0]
-      const u = (s + 32768) & 0xFFFF;
+      // Mask with 0xFFFF before shifting to prevent JS sign-extension beyond bit 15.
+      const u = s & 0xFFFF;
       chunk.push((u >> 9) & 0x7F);   // b2: bits 15..9
       chunk.push((u >> 2) & 0x7F);   // b1: bits  8..2
-      chunk.push((u) & 0x03);   // b0: bits  1..0  (raw, 0-3, matches Python)
+      chunk.push( u       & 0x03);   // b0: bits  1..0
     }
     // Checksum per MMA SDS spec and Python reference:
     // XOR of all bytes between F0 and F7 exclusive:
@@ -805,7 +801,9 @@ function buildNameSysEx(slot, name) {
   ]);
 }
 
-// Flatten all SDS packets for a slot into one Uint8Array (for .syx download)
+// Flatten all SDS packets for a slot into one Uint8Array (for .syx download).
+// Name SysEx is placed first so the MD registers the name before the audio data arrives;
+// both name and dump header always carry the same slot number, set by rebuildSDS().
 function flattenSDS(packets, nameSysEx) {
   // Name first, then header+data — overwrites MD cached name before audio arrives
   const parts = [nameSysEx, ...packets.map(p => p.data)];
@@ -1455,13 +1453,13 @@ async function importSysexIntoSlot(file, slotIndex) {
   const item = {
     id: nextId++,
     name: file.name,
-    rawBuffer: buffer,       // keep original .syx as raw
+    rawBuffer: buffer,       // keep original .syx as the immutable source record
     processedBuffer: wavBuf,
     hqBuffer: null,
     pcm16: parsed.pcm16,
-    syxData: new Uint8Array(buffer), // original syx IS the syx data
-    sdsPackets: null,
-    nameSysEx: buildNameSysEx(slotIndex, name),
+    syxData: null,           // populated below by rebuildSDS() with the correct slot number
+    sdsPackets: null,        // populated below by rebuildSDS()
+    nameSysEx: null,         // populated below by rebuildSDS()
     rootNote: 69,
     targetMidi: 69,
     customName: name,
@@ -1485,6 +1483,13 @@ async function importSysexIntoSlot(file, slotIndex) {
 
   state.sourceFiles.push(item);
   state.slots[slotIndex] = item.id;
+
+  // Rebuild SDS packets and syxData for the TARGET slot, not whatever slot
+  // was encoded in the original file. The raw .syx may have been exported from
+  // a different slot, so reusing its bytes verbatim would embed the wrong slot
+  // number in the dump header and Elektron name SysEx, corrupting the transfer.
+  rebuildSDS(item, slotIndex);
+
   renderSourceList();
   renderSlotGrid();
   updateMemGauge();
