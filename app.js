@@ -696,16 +696,30 @@ function parseSysexFile(buffer) {
   // Sort packets by pktNum (wraps at 0x7F)
   dataPackets.sort((a, b) => a.pktNum - b.pktNum);
 
-  // Decode 3×7-bit → signed 16-bit (offset binary, matching the encoder above):
-  //   u16 = (b2 << 9) | (b1 << 2) | (b0 & 0x03)
-  //   s   = u16 - 32768
+  // Decode 3×7-bit → signed 16-bit (offset binary: s = u16 - 32768).
+  //
+  // Two conventions exist for the third byte (the low 2 bits of each sample):
+  //   • Bits 1–0  (& 0x03):        live MD captures, app-exported files
+  //   • Bits 6–5  (>> 5 & 0x03):   Elektron library .syx files
+  //
+  // Auto-detect by scanning the first packet: if ANY third byte has bits set
+  // outside 1–0 (i.e. byte & 0xFC is non-zero), it must be the shifted convention.
+  let useShiftedLSB = false;
+  if (dataPackets.length > 0) {
+    const probe = dataPackets[0].data;
+    for (let k = 2; k < 120; k += 3) {
+      if (probe[k] & 0xFC) { useShiftedLSB = true; break; }
+    }
+  }
+
   const totalSamples = result.numSamples || dataPackets.length * 40;
   const pcm16 = new Int16Array(totalSamples);
   let sampleIdx = 0;
   for (const pkt of dataPackets) {
     const d = pkt.data;
     for (let k = 0; k < 120 && sampleIdx < totalSamples; k += 3) {
-      const u = (d[k] << 9) | (d[k + 1] << 2) | (d[k + 2] & 0x03);
+      const lsb = useShiftedLSB ? (d[k + 2] >> 5) & 0x03 : d[k + 2] & 0x03;
+      const u = (d[k] << 9) | (d[k + 1] << 2) | lsb;
       pcm16[sampleIdx++] = u - 32768;  // offset binary → signed
     }
   }
