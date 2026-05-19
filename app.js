@@ -696,18 +696,17 @@ function parseSysexFile(buffer) {
   // Sort packets by pktNum (wraps at 0x7F)
   dataPackets.sort((a, b) => a.pktNum - b.pktNum);
 
-  // Decode 3×7-bit → signed 16-bit per MMA SDS spec (two's complement, no offset).
-  // Reconstruct the 16-bit value by shifting each 7-bit byte back to its original position,
-  // then sign-extend from bit 15 so negative samples are correctly represented in Int16Array.
+  // Decode 3×7-bit → signed 16-bit (offset binary, matching the encoder above):
+  //   u16 = (b2 << 9) | (b1 << 2) | (b0 & 0x03)
+  //   s   = u16 - 32768
   const totalSamples = result.numSamples || dataPackets.length * 40;
   const pcm16 = new Int16Array(totalSamples);
   let sampleIdx = 0;
   for (const pkt of dataPackets) {
     const d = pkt.data;
     for (let k = 0; k < 120 && sampleIdx < totalSamples; k += 3) {
-      let u = (d[k] << 9) | (d[k + 1] << 2) | (d[k + 2] & 0x03);
-      if (u & 0x8000) u |= 0xFFFF0000;  // sign-extend bit 15 → bits 31..16
-      pcm16[sampleIdx++] = u;            // Int16Array truncates to lower 16 bits
+      const u = (d[k] << 9) | (d[k + 1] << 2) | (d[k + 2] & 0x03);
+      pcm16[sampleIdx++] = u - 32768;  // offset binary → signed
     }
   }
 
@@ -756,13 +755,13 @@ function buildSDS(slot, pcm16Data, sampleRate, channels, loopStart, loopEnd, has
     const chunk = [];
     for (let j = 0; j < SAMPLES_PER_PACKET; j++) {
       const s = i + j < totalSamples ? pcm16Data[i + j] : 0;
-      // MMA SDS 16-bit → 3×7-bit packing (signed two's complement, no offset):
-      //   b2 = (s >> 9) & 0x7F   bits 15..9  (MSB, sign bit in position 6)
-      //   b1 = (s >> 2) & 0x7F   bits  8..2  (mid)
-      //   b0 =  s       & 0x03   bits  1..0  (LSB, raw value 0..3)
+      // SDS 16-bit → 3×7-bit packing (offset binary, tested working with MD hardware):
+      //   u16 = (s + 32768) & 0xFFFF  — convert signed to unsigned offset binary
+      //   b2 = (u16 >> 9) & 0x7F   bits 15..9  (MSB)
+      //   b1 = (u16 >> 2) & 0x7F   bits  8..2  (mid)
+      //   b0 =  u16        & 0x03   bits  1..0  (LSB, raw value 0..3)
       //   packet order: [b2, b1, b0]
-      // Mask with 0xFFFF before shifting to prevent JS sign-extension beyond bit 15.
-      const u = s & 0xFFFF;
+      const u = (s + 32768) & 0xFFFF;
       chunk.push((u >> 9) & 0x7F);   // b2: bits 15..9
       chunk.push((u >> 2) & 0x7F);   // b1: bits  8..2
       chunk.push( u       & 0x03);   // b0: bits  1..0
