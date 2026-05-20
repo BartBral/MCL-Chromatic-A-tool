@@ -708,20 +708,38 @@ function parseSysexFile(buffer) {
 
   // Decode 3×7-bit → signed 16-bit (offset binary: s = u16 - 32768).
   //
-  // The low 2 bits of each sample occupy one of two positions in the third byte,
+  // The 2 LSBs of each sample occupy one of two positions in the third byte,
   // depending on which software produced the file:
-  //   • Bits 1–0  (& 0x03):         app-exported files
-  //   • Bits 6–5  ((>> 5) & 0x03):  MD hardware dumps, C6, Elektron sample packs
+  //   • Bits 6–5  ((>> 5) & 0x03):  MD hardware dumps, C6, Elektron official packs
+  //                                  ← this is what the Python reference always uses
+  //   • Bits 1–0  (& 0x03):         files exported by this app
   //
-  // Auto-detect by scanning the first packet: if any third byte has bits set
-  // above position 1 (byte & 0xFC non-zero), the file uses the shifted convention.
-  let useShiftedLSB = false;
+  // Auto-detect by energy: decode the first packet both ways and pick whichever
+  // produces higher RMS energy. The wrong decode maps all mid-codes identically,
+  // yielding near-silence (the 2 dropped bits barely matter for energy on normal
+  // audio, BUT the shifted convention maps b2/b1 correctly while & 0x03 on a
+  // >> 5 file always reads 0 for those bits, producing a systematically quieter,
+  // distorted signal). For silence/DC source audio both give the same result, so
+  // we default to the MD/Elektron convention (>> 5) when energies are tied.
+  let useShiftedLSB = true; // default: MD hardware / Elektron official convention
   if (dataPackets.length > 0) {
     const probe = dataPackets[0].data;
-    for (let k = 2; k < 120; k += 3) {
-      if (probe[k] & 0xFC) { useShiftedLSB = true; break; }
+    let energyShifted = 0, energyRaw = 0;
+    const probeCount = Math.min(40, Math.floor(probe.length / 3));
+    for (let k = 0; k < probeCount * 3; k += 3) {
+      const uShifted = (probe[k] << 9) | (probe[k + 1] << 2) | ((probe[k + 2] >> 5) & 0x03);
+      const uRaw     = (probe[k] << 9) | (probe[k + 1] << 2) | ( probe[k + 2]        & 0x03);
+      const sShifted = uShifted - 32768;
+      const sRaw     = uRaw     - 32768;
+      energyShifted += sShifted * sShifted;
+      energyRaw     += sRaw     * sRaw;
     }
+    // Use raw (& 0x03) only if it is clearly louder — meaning the file was
+    // produced by this app (which packs LSBs into bits 1–0).
+    // A 1% margin avoids flipping on pure silence or DC where both are equal.
+    useShiftedLSB = energyShifted >= energyRaw * 0.99;
   }
+  result.lsbConvention = useShiftedLSB ? 'shifted' : 'raw'; // for debugging
 
   const totalSamples = result.numSamples || dataPackets.length * 40;
   const pcm16 = new Int16Array(totalSamples);
