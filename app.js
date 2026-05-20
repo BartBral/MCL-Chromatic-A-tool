@@ -659,7 +659,7 @@ function parseSysexFile(buffer) {
       const rawRate = periodNs > 0 ? Math.round(1e9 / periodNs) : 44100;
       // The period field is an integer number of nanoseconds, so 1e9/period is
       // rarely exact. Snap to the nearest standard rate within 0.5% to absorb
-      // rounding errors — e.g. period=22676 → 44099.8 → snaps to 44100.
+      // rounding errors (e.g. period=22676 gives 44099.8, snaps to 44100).
       const STANDARD_RATES = [8000, 11025, 22050, 32000, 44100, 48000];
       const snapped = STANDARD_RATES.reduce((best, r) =>
         Math.abs(r - rawRate) < Math.abs(best - rawRate) ? r : best, rawRate);
