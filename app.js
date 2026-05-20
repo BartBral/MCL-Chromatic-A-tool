@@ -681,10 +681,10 @@ function parseSysexFile(buffer) {
       let chk = 0;
       for (let k = 1; k < 125; k++) chk ^= msg[k];
       chk &= 0x7F;
-      if (chk !== msg[125]) {
-        result.error = `Checksum error in packet ${msg[4]}`;
-        return result;
-      }
+      // Accept packets even if checksum fails: Elektron-produced files use a
+      // non-standard checksum. The Python reference (len/sds2wav) skips
+      // checksum verification entirely. Track warnings but do not abort.
+      if (chk !== msg[125]) result.checksumWarnings = (result.checksumWarnings || 0) + 1;
       dataPackets.push({ pktNum: msg[4], data: msg.slice(5, 125) });
     }
 
