@@ -706,49 +706,18 @@ function parseSysexFile(buffer) {
   // Sort packets by pktNum (wraps at 0x7F)
   dataPackets.sort((a, b) => a.pktNum - b.pktNum);
 
-  // Decode 3×7-bit → signed 16-bit (offset binary: s = u16 - 32768).
+  // Decode 3×7-bit → signed 16-bit, identical to the Python reference (len/sds2wav):
+  //   read_16bits: ((data[0] << 9) | (data[1] << 2) | (data[2] >> 5)) - 0x8000
   //
-  // The 2 LSBs of each sample occupy one of two positions in the third byte,
-  // depending on which software produced the file:
-  //   • Bits 6–5  ((>> 5) & 0x03):  MD hardware dumps, C6, Elektron official packs
-  //                                  ← this is what the Python reference always uses
-  //   • Bits 1–0  (& 0x03):         files exported by this app
-  //
-  // Auto-detect by energy: decode the first packet both ways and pick whichever
-  // produces higher RMS energy. The wrong decode maps all mid-codes identically,
-  // yielding near-silence (the 2 dropped bits barely matter for energy on normal
-  // audio, BUT the shifted convention maps b2/b1 correctly while & 0x03 on a
-  // >> 5 file always reads 0 for those bits, producing a systematically quieter,
-  // distorted signal). For silence/DC source audio both give the same result, so
-  // we default to the MD/Elektron convention (>> 5) when energies are tied.
-  let useShiftedLSB = true; // default: MD hardware / Elektron official convention
-  if (dataPackets.length > 0) {
-    const probe = dataPackets[0].data;
-    let energyShifted = 0, energyRaw = 0;
-    const probeCount = Math.min(40, Math.floor(probe.length / 3));
-    for (let k = 0; k < probeCount * 3; k += 3) {
-      const uShifted = (probe[k] << 9) | (probe[k + 1] << 2) | ((probe[k + 2] >> 5) & 0x03);
-      const uRaw     = (probe[k] << 9) | (probe[k + 1] << 2) | ( probe[k + 2]        & 0x03);
-      const sShifted = uShifted - 32768;
-      const sRaw     = uRaw     - 32768;
-      energyShifted += sShifted * sShifted;
-      energyRaw     += sRaw     * sRaw;
-    }
-    // Use raw (& 0x03) only if it is clearly louder — meaning the file was
-    // produced by this app (which packs LSBs into bits 1–0).
-    // A 1% margin avoids flipping on pure silence or DC where both are equal.
-    useShiftedLSB = energyShifted >= energyRaw * 0.99;
-  }
-  result.lsbConvention = useShiftedLSB ? 'shifted' : 'raw'; // for debugging
-
+  // The 2 LSBs always live in bits 6–5 of the third byte in all MD/Elektron files.
+  // buildSDS is aligned to match: it encodes with (u & 0x03) << 5.
   const totalSamples = result.numSamples || dataPackets.length * 40;
   const pcm16 = new Int16Array(totalSamples);
   let sampleIdx = 0;
   for (const pkt of dataPackets) {
     const d = pkt.data;
     for (let k = 0; k < 120 && sampleIdx < totalSamples; k += 3) {
-      const lsb = useShiftedLSB ? (d[k + 2] >> 5) & 0x03 : d[k + 2] & 0x03;
-      const u = (d[k] << 9) | (d[k + 1] << 2) | lsb;
+      const u = (d[k] << 9) | (d[k + 1] << 2) | (d[k + 2] >> 5);
       pcm16[sampleIdx++] = u - 32768;  // offset binary → signed
     }
   }
@@ -798,16 +767,17 @@ function buildSDS(slot, pcm16Data, sampleRate, channels, loopStart, loopEnd, has
     const chunk = [];
     for (let j = 0; j < SAMPLES_PER_PACKET; j++) {
       const s = i + j < totalSamples ? pcm16Data[i + j] : 0;
-      // SDS 16-bit → 3×7-bit packing (offset binary, tested working with MD hardware):
+      // SDS 16-bit → 3×7-bit packing (offset binary, matches Python read_16bits convention):
       //   u16 = (s + 32768) & 0xFFFF  — convert signed to unsigned offset binary
       //   b2 = (u16 >> 9) & 0x7F   bits 15..9  (MSB)
       //   b1 = (u16 >> 2) & 0x7F   bits  8..2  (mid)
-      //   b0 =  u16        & 0x03   bits  1..0  (LSB, raw value 0..3)
+      //   b0 = (u16 & 0x03) << 5   bits  1..0  shifted to positions 6..5
       //   packet order: [b2, b1, b0]
+      //   decoder: (b2 << 9) | (b1 << 2) | (b0 >> 5)  ← identical to Python read_16bits
       const u = (s + 32768) & 0xFFFF;
-      chunk.push((u >> 9) & 0x7F);   // b2: bits 15..9
-      chunk.push((u >> 2) & 0x7F);   // b1: bits  8..2
-      chunk.push( u       & 0x03);   // b0: bits  1..0
+      chunk.push((u >> 9) & 0x7F);        // b2: bits 15..9
+      chunk.push((u >> 2) & 0x7F);        // b1: bits  8..2
+      chunk.push((u & 0x03) << 5);        // b0: bits  1..0 → stored in positions 6..5
     }
     // Checksum per MMA SDS spec and Python reference:
     // XOR of all bytes between F0 and F7 exclusive:
