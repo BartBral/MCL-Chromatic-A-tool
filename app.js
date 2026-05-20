@@ -698,12 +698,13 @@ function parseSysexFile(buffer) {
 
   // Decode 3×7-bit → signed 16-bit (offset binary: s = u16 - 32768).
   //
-  // Two conventions exist for the third byte (the low 2 bits of each sample):
-  //   • Bits 1–0  (& 0x03):        live MD captures, app-exported files
-  //   • Bits 6–5  (>> 5 & 0x03):   Elektron library .syx files
+  // The low 2 bits of each sample occupy one of two positions in the third byte,
+  // depending on which software produced the file:
+  //   • Bits 1–0  (& 0x03):         app-exported files
+  //   • Bits 6–5  ((>> 5) & 0x03):  MD hardware dumps, C6, Elektron sample packs
   //
-  // Auto-detect by scanning the first packet: if ANY third byte has bits set
-  // outside 1–0 (i.e. byte & 0xFC is non-zero), it must be the shifted convention.
+  // Auto-detect by scanning the first packet: if any third byte has bits set
+  // above position 1 (byte & 0xFC non-zero), the file uses the shifted convention.
   let useShiftedLSB = false;
   if (dataPackets.length > 0) {
     const probe = dataPackets[0].data;
