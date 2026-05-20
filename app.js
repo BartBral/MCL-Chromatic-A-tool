@@ -632,11 +632,28 @@ function parseSysexFile(buffer) {
   while (i < bytes.length) {
     // Find next F0
     if (bytes[i] !== 0xF0) { i++; continue; }
+    if (i + 3 >= bytes.length) break;
 
-    // Need at least 3 bytes to identify message type
-    if (i + 2 >= bytes.length) break;
+    // Peek at the message type before deciding how to find the end.
+    // SDS data packets (F0 7E xx 02 ...) are always exactly 127 bytes and can
+    // contain 0xF7 in their payload, so scanning for F7 would truncate them.
+    // Read them as a fixed-length block instead of scanning for the terminator.
+    if (bytes[i + 1] === 0x7E && bytes[i + 3] === 0x02) {
+      if (i + 127 > bytes.length) break;
+      const msg = bytes.slice(i, i + 127);
+      let chk = 0;
+      for (let k = 1; k < 125; k++) chk ^= msg[k];
+      chk &= 0x7F;
+      // Accept packets regardless of checksum: Elektron-produced files use a
+      // non-standard checksum. The Python reference (len/sds2wav) skips
+      // checksum verification entirely. Track warnings but do not abort.
+      if (chk !== msg[125]) result.checksumWarnings = (result.checksumWarnings || 0) + 1;
+      dataPackets.push({ pktNum: msg[4], data: msg.slice(5, 125) });
+      i += 127;
+      continue;
+    }
 
-    // Find matching F7
+    // All other SysEx messages are terminated by F7 — scan for it.
     let end = i + 1;
     while (end < bytes.length && bytes[end] !== 0xF7) end++;
     if (end >= bytes.length) break;
@@ -672,20 +689,6 @@ function parseSysexFile(buffer) {
       result.loopStart = lsRaw;
       result.loopEnd = leRaw;
       foundHeader = true;
-    }
-
-    // SDS Data Packet: F0 7E <dev> 02 <pktNum> <120 bytes> <chk> F7 (127 bytes total)
-    else if (msg.length === 127 && msg[1] === 0x7E && msg[3] === 0x02) {
-      // Verify checksum per MMA SDS spec: XOR of bytes at indices 1..124 inclusive
-      // (the 4 header bytes after F0, plus all 120 payload bytes), result masked to 7 bits.
-      let chk = 0;
-      for (let k = 1; k < 125; k++) chk ^= msg[k];
-      chk &= 0x7F;
-      // Accept packets even if checksum fails: Elektron-produced files use a
-      // non-standard checksum. The Python reference (len/sds2wav) skips
-      // checksum verification entirely. Track warnings but do not abort.
-      if (chk !== msg[125]) result.checksumWarnings = (result.checksumWarnings || 0) + 1;
-      dataPackets.push({ pktNum: msg[4], data: msg.slice(5, 125) });
     }
 
     i = end + 1;
