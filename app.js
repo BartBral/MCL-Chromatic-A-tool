@@ -656,7 +656,14 @@ function parseSysexFile(buffer) {
       result.slot = result.slot !== null ? result.slot : (msg[4] | (msg[5] << 7));
       result.bitsPerWord = msg[6];
       const periodNs = dec3(msg, 7);
-      result.sampleRate = periodNs > 0 ? Math.round(1e9 / periodNs) : 44100;
+      const rawRate = periodNs > 0 ? Math.round(1e9 / periodNs) : 44100;
+      // The period field is an integer number of nanoseconds, so 1e9/period is
+      // rarely exact. Snap to the nearest standard rate within 0.5% to absorb
+      // rounding errors — e.g. period=22676 → 44099.8 → snaps to 44100.
+      const STANDARD_RATES = [8000, 11025, 22050, 32000, 44100, 48000];
+      const snapped = STANDARD_RATES.reduce((best, r) =>
+        Math.abs(r - rawRate) < Math.abs(best - rawRate) ? r : best, rawRate);
+      result.sampleRate = (Math.abs(snapped - rawRate) / rawRate < 0.005) ? snapped : rawRate;
       result.numSamples = dec3(msg, 10);
       const lsRaw = dec3(msg, 13);
       const leRaw = dec3(msg, 16);
