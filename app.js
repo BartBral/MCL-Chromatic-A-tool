@@ -706,43 +706,21 @@ function parseSysexFile(buffer) {
   // Sort packets by pktNum (wraps at 0x7F)
   dataPackets.sort((a, b) => a.pktNum - b.pktNum);
 
-  // Decode 3×7-bit → signed 16-bit (offset binary: s = u16 - 32768).
-  //
-  // The low 2 bits of each sample occupy one of two positions in the third byte,
-  // depending on which software produced the file:
-  //   • Bits 1–0  (& 0x03):         app-exported files
-  //   • Bits 6–5  ((>> 5) & 0x03):  MD hardware dumps, C6, Elektron sample packs
-  //
-  // Auto-detect by scanning the first packet: if any third byte has bits set
-  // above position 1 (byte & 0xFC non-zero), the file uses the shifted convention.
-  let useShiftedLSB = false;
-  if (dataPackets.length > 0) {
-    const probe = dataPackets[0].data;
-    for (let k = 2; k < 120; k += 3) {
-      if (probe[k] & 0xFC) { useShiftedLSB = true; break; }
-    }
-  }
-
+  // Decode 3×7-bit → signed 16-bit, identical to the Python reference (len/sds2wav):
+  //   read_16bits: ((data[0] << 9) | (data[1] << 2) | (data[2] >> 5)) - 0x8000
   const totalSamples = result.numSamples || dataPackets.length * 40;
   const pcm16 = new Int16Array(totalSamples);
   let sampleIdx = 0;
   for (const pkt of dataPackets) {
     const d = pkt.data;
     for (let k = 0; k < 120 && sampleIdx < totalSamples; k += 3) {
-      const lsb = useShiftedLSB ? (d[k + 2] >> 5) & 0x03 : d[k + 2] & 0x03;
-      const u = (d[k] << 9) | (d[k + 1] << 2) | lsb;
-      pcm16[sampleIdx++] = u - 32768;  // offset binary → signed
+      const u = (d[k] << 9) | (d[k + 1] << 2) | (d[k + 2] >> 5);
+      pcm16[sampleIdx++] = u - 32768;
     }
   }
 
   result.pcm16 = pcm16;
   result.ok = true;
-
-  // DEBUG — remove after diagnosis
-  console.log('[SDS parse] totalSamples:', totalSamples, 'packets:', dataPackets.length);
-  console.log('[SDS parse] first 10 raw packet bytes (offset 0-29 of first packet data):', Array.from(dataPackets[0].data.slice(0,30)).map(b => '0x'+b.toString(16).padStart(2,'0')).join(' '));
-  console.log('[SDS parse] first 10 decoded pcm16 samples:', Array.from(pcm16.slice(0,10)));
-
   return result;
 }
 
@@ -786,16 +764,13 @@ function buildSDS(slot, pcm16Data, sampleRate, channels, loopStart, loopEnd, has
     const chunk = [];
     for (let j = 0; j < SAMPLES_PER_PACKET; j++) {
       const s = i + j < totalSamples ? pcm16Data[i + j] : 0;
-      // SDS 16-bit → 3×7-bit packing (offset binary, tested working with MD hardware):
-      //   u16 = (s + 32768) & 0xFFFF  — convert signed to unsigned offset binary
-      //   b2 = (u16 >> 9) & 0x7F   bits 15..9  (MSB)
-      //   b1 = (u16 >> 2) & 0x7F   bits  8..2  (mid)
-      //   b0 =  u16        & 0x03   bits  1..0  (LSB, raw value 0..3)
-      //   packet order: [b2, b1, b0]
+      // SDS 16-bit → 3×7-bit packing (offset binary), matching Python read_16bits exactly:
+      //   decoder: (b2 << 9) | (b1 << 2) | (b0 >> 5)
+      //   so b0 must store the 2 LSBs in bits 6..5: b0 = (u & 0x03) << 5
       const u = (s + 32768) & 0xFFFF;
-      chunk.push((u >> 9) & 0x7F);   // b2: bits 15..9
-      chunk.push((u >> 2) & 0x7F);   // b1: bits  8..2
-      chunk.push( u       & 0x03);   // b0: bits  1..0
+      chunk.push((u >> 9) & 0x7F);        // b2: bits 15..9
+      chunk.push((u >> 2) & 0x7F);        // b1: bits  8..2
+      chunk.push((u & 0x03) << 5);        // b0: 2 LSBs in bits 6..5
     }
     // Checksum per MMA SDS spec and Python reference:
     // XOR of all bytes between F0 and F7 exclusive:
@@ -1519,18 +1494,6 @@ async function importSysexIntoSlot(file, slotIndex) {
   // a different slot, so reusing its bytes verbatim would embed the wrong slot
   // number in the dump header and Elektron name SysEx, corrupting the transfer.
   rebuildSDS(item, slotIndex);
-
-  // DEBUG — remove after diagnosis
-  console.log('[importSysex] item.pcm16 first 10:', Array.from(item.pcm16.slice(0,10)));
-  {
-    const d = item.syxData;
-    for (let i = 0; i < d.length - 5; i++) {
-      if (d[i]===0xF0 && d[i+1]===0x7E && d[i+3]===0x02) {
-        console.log('[importSysex] re-encoded first data packet bytes [5..34]:', Array.from(d.slice(i+5, i+35)).map(b=>'0x'+b.toString(16).padStart(2,'0')).join(' '));
-        break;
-      }
-    }
-  }
 
   renderSourceList();
   renderSlotGrid();
